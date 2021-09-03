@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  app:
+    image: deminy/counit
+    tty: true
+    links:
+      - redis
+    volumes:
+      - ./:/var/www
+  redis:
+    image: redis

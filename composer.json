@@ -1,0 +1,28 @@
+{
+    "name": "deminy/counit",
+    "description": "To run I/O related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster using Swoole.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "phpunit",
+        "swoole"
+    ],
+    "require": {
+        "php": ">=7.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "~8.0 || ~9.0",
+        "swoole/ide-helper": ">=4.6"
+    },
+    "bin": [
+        "./bin/counit"
+    ],
+    "suggest": {
+        "ext-swoole": "To run I/O related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster."
+    },
+    "autoload": {
+        "psr-4": {
+            "Deminy\\Counit\\": "src"
+        }
+    }
+}
