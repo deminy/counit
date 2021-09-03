@@ -6,6 +6,5 @@ RUN set -ex \
     pecl update-channels && \
     pecl install redis-5.3.4 && \
     docker-php-ext-enable redis && \
-    echo "swoole.use_shortname=Off" >> /usr/local/etc/php/conf.d/docker-php-ext-swoole.ini && \
     apk del .build-deps && \
     rm -rf /var/cache/apk/* /tmp/*

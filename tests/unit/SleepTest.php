@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Deminy\Counit\Tests;
 
-use Deminy\Counit\Co;
+use Deminy\Counit\Counit;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @internal
- * @covers \Deminy\Counit\Co
+ * @covers \Deminy\Counit\Counit
  */
 class SleepTest extends TestCase
 {
@@ -28,9 +28,9 @@ class SleepTest extends TestCase
      */
     public function testSleep(int $seconds, string $message): void
     {
-        Co::go(function () use ($seconds, $message) {
+        Counit::create(function () use ($seconds, $message) {
             $startTime = time();
-            Co::sleep($seconds);
+            Counit::sleep($seconds);
             $endTime = time();
 
             self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);

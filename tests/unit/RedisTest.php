@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Deminy\Counit\Tests;
 
-use Deminy\Counit\Co;
+use Deminy\Counit\Counit;
 use Deminy\Counit\TestKey;
 use PHPUnit\Framework\TestCase;
 use Redis;
 
 /**
  * @internal
- * @covers \Deminy\Counit\Co
+ * @covers \Deminy\Counit\Counit
  */
 class RedisTest extends TestCase
 {
@@ -36,14 +36,14 @@ class RedisTest extends TestCase
      */
     public function testRedis(int $seconds, string $message): void
     {
-        Co::go(function () use ($seconds, $message) {
+        Counit::create(function () use ($seconds, $message) {
             $redis = new Redis();
             $redis->connect('redis');
 
             $key = TestKey::nextKey();
             $redis->setex($key, $seconds, 'dummy');
             self::assertSame('dummy', $redis->get($key), 'The new entry should have been added successfully.');
-            Co::sleep($seconds + 1);
+            Counit::sleep($seconds + 1);
             self::assertFalse($redis->get($key), $message);
 
             $redis->close();
