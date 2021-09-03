@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
 
 /**
@@ -17,20 +18,36 @@ class Counit
      */
     public static function create(callable $callable): int
     {
-        if (Coroutine::getCid() === -1) {
-            $callable();
-            return 0;
+        if (self::runningWithCounit()) {
+            $id = Coroutine::create($callable);
+            return ($id !== false) ? $id : -1;
         }
-        $id = Coroutine::create($callable);
-        return ($id !== false) ? $id : -1;
+
+        $callable();
+        return 0;
     }
 
     public static function sleep(int $seconds): void
     {
-        if (Coroutine::getCid() === -1) {
-            \sleep($seconds);
-        } else {
+        if (self::runningWithCounit()) {
             Coroutine::sleep($seconds);
+        } else {
+            \sleep($seconds);
         }
+    }
+
+    /**
+     * To suppress warning message "This test did not perform any assertions", and to make the counters match.
+     */
+    public static function addToAssertionCount(TestCase $test, int $count): void
+    {
+        if (self::runningWithCounit()) {
+            $test->addToAssertionCount($count);
+        }
+    }
+
+    protected static function runningWithCounit(): bool
+    {
+        return Coroutine::getCid() !== -1;
     }
 }

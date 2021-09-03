@@ -36,6 +36,6 @@ class SleepTest extends TestCase
             self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
         });
 
-        self::addToAssertionCount(1); // To suppress warning message "This test did not perform any assertions".
+        Counit::addToAssertionCount($this, 1);
     }
 }

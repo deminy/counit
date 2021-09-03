@@ -49,6 +49,6 @@ class RedisTest extends TestCase
             $redis->close();
         });
 
-        self::addToAssertionCount(1); // To suppress warning message "This test did not perform any assertions".
+        Counit::addToAssertionCount($this, 2);
     }
 }

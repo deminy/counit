@@ -6,9 +6,15 @@ namespace Deminy\Counit;
 
 class TestKey
 {
-    protected static string $prefix;
+    /**
+     * @var string
+     */
+    protected static $prefix;
 
-    protected static int $counter = 0;
+    /**
+     * @var int
+     */
+    protected static $counter = 0;
 
     public static function nextKey(): string
     {
