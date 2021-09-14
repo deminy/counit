@@ -17,5 +17,9 @@
 /vendor/*
 
 # Ignore test files
-/phpunit.xml
+/.php-cs-fixer.dist.php
 /.phpunit.result.cache
+/phpunit.xml
+
+# Ignore temporary files
+/.phplint-cache
