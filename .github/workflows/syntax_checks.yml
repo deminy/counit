@@ -17,4 +17,4 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Run Syntax Checks
-        run: docker run --rm -v "$(pwd):/project" -w /project -i jakzal/phpqa:php${{ matrix.php }} phplint bin/counit src tests
+        run: docker run --rm -v "$(pwd):/project" -w /project -i jakzal/phpqa:php${{ matrix.php }} phplint src tests ./counit

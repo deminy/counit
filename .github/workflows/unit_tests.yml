@@ -20,7 +20,7 @@ jobs:
         run: |
           set -ex
           docker exec -t $(docker ps -qf "name=app") sh -c "./vendor/bin/phpunit"
-          docker exec -t $(docker ps -qf "name=app") sh -c "./bin/counit"
+          docker exec -t $(docker ps -qf "name=app") sh -c "./counit"
 
       - name: Stop and Remove Docker Containers
         run: docker-compose down

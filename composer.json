@@ -15,7 +15,7 @@
         "swoole/ide-helper": ">=4.6"
     },
     "bin": [
-        "./bin/counit"
+        "counit"
     ],
     "suggest": {
         "ext-swoole": "To run time/IO related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster."
