@@ -15,12 +15,6 @@ use Redis;
  */
 class RedisTest extends TestCase
 {
-    public static function setUpBeforeClass(): void
-    {
-        parent::setUpBeforeClass();
-        TestKey::initPrefix();
-    }
-
     public function dataRedis(): array
     {
         return [
@@ -41,7 +35,7 @@ class RedisTest extends TestCase
                 $redis = new Redis();
                 $redis->connect('redis');
 
-                $key = TestKey::nextKey();
+                $key = TestKey::getNewKey();
                 $redis->setex($key, $seconds, 'dummy');
                 self::assertSame('dummy', $redis->get($key), 'The new entry should have been added successfully.');
                 Counit::sleep($seconds + 1);

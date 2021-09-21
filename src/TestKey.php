@@ -16,7 +16,7 @@ class TestKey
      */
     protected static $counter = 0;
 
-    public static function nextKey(): string
+    public static function getNewKey(): string
     {
         if (!isset(self::$prefix)) {
             self::initPrefix();
@@ -24,7 +24,24 @@ class TestKey
         return self::$prefix . (++self::$counter);
     }
 
-    public static function initPrefix(string $prefix = null): void
+    /**
+     * @return string[]
+     */
+    public static function getNewKeys(int $count): array
+    {
+        if ($count < 1) {
+            return [];
+        }
+
+        $keys = [];
+        for ($i = 0; $i < $count; $i++) {
+            $keys[] = self::getNewKey();
+        }
+
+        return $keys;
+    }
+
+    protected static function initPrefix(string $prefix = null): void
     {
         if (!isset($prefix)) {
             $prefix = uniqid('test-key-') . '-' . getmypid() . '-';
