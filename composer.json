@@ -1,6 +1,6 @@
 {
     "name": "deminy/counit",
-    "description": "To run I/O related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster using Swoole.",
+    "description": "To run time/IO related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster using Swoole.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -18,7 +18,7 @@
         "./bin/counit"
     ],
     "suggest": {
-        "ext-swoole": "To run I/O related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster."
+        "ext-swoole": "To run time/IO related unit tests (e.g., sleep function calls, database queries, API calls, etc) faster."
     },
     "autoload": {
         "psr-4": {

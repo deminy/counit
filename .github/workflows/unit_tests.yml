@@ -1,0 +1,26 @@
+name: Unit Tests
+
+on: [ push, pull_request, workflow_dispatch ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup Services
+        run: |
+          docker-compose up --build -d
+          docker ps -a
+          docker exec -t $(docker ps -qf "name=app") sh -c "composer install -n"
+
+      - name: Run Unit Tests
+        run: |
+          set -ex
+          docker exec -t $(docker ps -qf "name=app") sh -c "./vendor/bin/phpunit"
+          docker exec -t $(docker ps -qf "name=app") sh -c "./bin/counit"
+
+      - name: Stop and Remove Docker Containers
+        run: docker-compose down
