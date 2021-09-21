@@ -36,19 +36,20 @@ class RedisTest extends TestCase
      */
     public function testRedis(int $seconds, string $message): void
     {
-        Counit::create(function () use ($seconds, $message) {
-            $redis = new Redis();
-            $redis->connect('redis');
+        Counit::create(
+            function () use ($seconds, $message) {
+                $redis = new Redis();
+                $redis->connect('redis');
 
-            $key = TestKey::nextKey();
-            $redis->setex($key, $seconds, 'dummy');
-            self::assertSame('dummy', $redis->get($key), 'The new entry should have been added successfully.');
-            Counit::sleep($seconds + 1);
-            self::assertFalse($redis->get($key), $message);
+                $key = TestKey::nextKey();
+                $redis->setex($key, $seconds, 'dummy');
+                self::assertSame('dummy', $redis->get($key), 'The new entry should have been added successfully.');
+                Counit::sleep($seconds + 1);
+                self::assertFalse($redis->get($key), $message);
 
-            $redis->close();
-        });
-
-        Counit::addToAssertionCount($this, 2);
+                $redis->close();
+            },
+            2 // The wrapped function call has two delayed assertions in it.
+        );
     }
 }

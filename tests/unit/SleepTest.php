@@ -28,14 +28,15 @@ class SleepTest extends TestCase
      */
     public function testSleep(int $seconds, string $message): void
     {
-        Counit::create(function () use ($seconds, $message) {
-            $startTime = time();
-            Counit::sleep($seconds);
-            $endTime = time();
+        Counit::create(
+            function () use ($seconds, $message) {
+                $startTime = time();
+                Counit::sleep($seconds);
+                $endTime = time();
 
-            self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
-        });
-
-        Counit::addToAssertionCount($this, 1);
+                self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
+            },
+            1 // The wrapped function call has one delayed assertion in it.
+        );
     }
 }
