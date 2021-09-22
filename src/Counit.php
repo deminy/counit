@@ -51,6 +51,6 @@ class Counit
 
     protected static function runningWithCounit(): bool
     {
-        return Coroutine::getCid() !== -1;
+        return extension_loaded('swoole') && (Coroutine::getCid() !== -1);
     }
 }

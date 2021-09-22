@@ -89,18 +89,22 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
-$code = 0;
-Swoole\Coroutine::set(
-    [
-        Swoole\Constant::OPTION_LOG_LEVEL   => SWOOLE_LOG_INFO,
-        Swoole\Constant::OPTION_TRACE_FLAGS => 0,
-        'exit_condition'                    => function () {
-            return Swoole\Coroutine::stats()['coroutine_num'] === 0;
-        },
-    ]
-);
-Swoole\Coroutine\run(function () use (&$code) {
-    $code = PHPUnit\TextUI\Command::main(false);
-    Swoole\Timer::clearAll();
-});
-exit($code);
+if (extension_loaded('swoole')) {
+    $code = 0;
+    Swoole\Coroutine::set(
+        [
+            Swoole\Constant::OPTION_LOG_LEVEL   => SWOOLE_LOG_INFO,
+            Swoole\Constant::OPTION_TRACE_FLAGS => 0,
+            'exit_condition'                    => function () {
+                return Swoole\Coroutine::stats()['coroutine_num'] === 0;
+            },
+        ]
+    );
+    Swoole\Coroutine\run(function () use (&$code) {
+        $code = PHPUnit\TextUI\Command::main(false);
+        Swoole\Timer::clearAll();
+    });
+    exit($code);
+}
+
+PHPUnit\TextUI\Command::main();
