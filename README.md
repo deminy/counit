@@ -58,24 +58,34 @@ To run the sample tests, please start the Docker containers and install Composer
 
 ```bash
 docker-compose up --build -d
-docker exec -t $(docker ps -qf "name=app") sh -c "composer install -n"
+docker exec -ti $(docker ps -qf "name=swoole") sh -c "composer install -n"
 ```
 
-There are two different ways to run the tests:
+There are three containers started: a PHP container, a Swoole container, and a Redis container. The PHP container doesn't
+have the Swoole extension installed, while the Swoole container has it installed and enabled.
+
+We can run the tests in different environments, with or without Swoole:
 
 `#1` Run the tests using _PHPUnit_:
 
 ```bash
-docker exec -t $(docker ps -qf "name=app") sh -c "./vendor/bin/phpunit"
+docker exec -ti $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit" # command 1.
+# or,
+docker exec -ti $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit" # command 2.
 ```
 
 `#2` Run the tests using _counit_:
 
 ```bash
-docker exec -t $(docker ps -qf "name=app") sh -c "./counit"
+docker exec -ti $(docker ps -qf "name=php") sh -c "./counit" # command 3
 ```
 
-When the Swoole extension is enabled, the second approach runs in non-blocking mode, and thus faster than the first one:
+```bash
+docker exec -ti $(docker ps -qf "name=swoole") sh -c "./counit" # command 4
+```
+
+The first three commands take about same amount of time to finish. The last command (the fourth command) uses _counit_
+and runs in the Swoole container (where the Swoole extension is enabled); thus it's faster than the others:
 
 <table>
   <tr>

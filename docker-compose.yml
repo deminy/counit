@@ -1,8 +1,19 @@
 version: '3.8'
 
 services:
-  app:
-    build: .
+  php:
+    build:
+      context: .
+      dockerfile: ./php.Dockerfile
+    tty: true
+    links:
+      - redis
+    volumes:
+      - ./:/var/www
+  swoole:
+    build:
+      context: .
+      dockerfile: ./swoole.Dockerfile
     tty: true
     links:
       - redis
