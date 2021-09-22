@@ -20,7 +20,7 @@ class Counit
      */
     public static function create(callable $callable, int $count = 0): int
     {
-        if (self::runningWithCounit()) {
+        if (self::isCoroutineFriendly()) {
             if ($count > 0) {
                 $trace = debug_backtrace();
                 if (!empty($trace[1]['object']) && ($trace[1]['object'] instanceof TestCase)) {
@@ -42,14 +42,14 @@ class Counit
 
     public static function sleep(int $seconds): void
     {
-        if (self::runningWithCounit()) {
+        if (self::isCoroutineFriendly()) {
             Coroutine::sleep($seconds);
         } else {
             \sleep($seconds);
         }
     }
 
-    protected static function runningWithCounit(): bool
+    protected static function isCoroutineFriendly(): bool
     {
         return extension_loaded('swoole') && (Coroutine::getCid() !== -1);
     }
