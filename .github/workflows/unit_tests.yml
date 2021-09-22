@@ -5,6 +5,12 @@ on: [ push, pull_request, workflow_dispatch ]
 jobs:
   ci:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        phpunit: ["~8.0.0", "~8.0", "~9.0.0", "~9.0"]
+
+    name: Run Unit Tests With PHPUnit ${{ matrix.phpunit }}
 
     steps:
       - name: Checkout
@@ -14,7 +20,7 @@ jobs:
         run: |
           docker-compose up --build -d
           docker ps -a
-          docker exec -t $(docker ps -qf "name=app") sh -c "composer install -n"
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "composer require phpunit/phpunit ${{ matrix.phpunit }} --dev -n"
 
       - name: Run Unit Tests
         run: |
