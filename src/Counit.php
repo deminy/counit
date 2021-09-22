@@ -8,11 +8,15 @@ use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
 
 /**
- * This class allows unit tests to run in parallel (using Swoole) or in blocking mode (default behavior).
+ * This class allows unit tests to run in parallel (using counit + Swoole) or in blocking mode (default behavior).
  */
 class Counit
 {
     /**
+     * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
+     * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
+     * as under PHPUnit.
+     *
      * @param int $count an optional parameter to suppress warning message "This test did not perform any assertions",
      *                   and to make the counters match
      * @return int return 0 if not running inside a coroutine; otherwise, return the coroutine ID, or -1 when failed
@@ -40,6 +44,10 @@ class Counit
         return 0;
     }
 
+    /**
+     * Delays the program execution for the given number of seconds. It works asynchronously when possible, otherwise
+     * it works the same as PHP function sleep().
+     */
     public static function sleep(int $seconds): void
     {
         if (self::isCoroutineFriendly()) {
@@ -49,6 +57,9 @@ class Counit
         }
     }
 
+    /**
+     * Check to see if running unit tests using counit, with the Swoole extension enabled.
+     */
     protected static function isCoroutineFriendly(): bool
     {
         return extension_loaded('swoole') && (Coroutine::getCid() !== -1);

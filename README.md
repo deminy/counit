@@ -48,7 +48,7 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 
 # How to Use It
 
-Folder [./tests/unit]((https://github.com/deminy/counit/tree/master/tests/unit)) contains some sample tests, where we
+Folder [./tests/unit](https://github.com/deminy/counit/tree/master/tests/unit) contains some sample tests, where we
 perform following time-related tests:
 
 * Test _sleep()_ function calls in PHP.
