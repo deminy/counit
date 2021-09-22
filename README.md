@@ -77,10 +77,8 @@ docker exec -ti $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit" # co
 `#2` Run the tests using _counit_:
 
 ```bash
-docker exec -ti $(docker ps -qf "name=php") sh -c "./counit" # command 3
-```
-
-```bash
+docker exec -ti $(docker ps -qf "name=php")    sh -c "./counit" # command 3
+# or,
 docker exec -ti $(docker ps -qf "name=swoole") sh -c "./counit" # command 4
 ```
 
