@@ -8,10 +8,10 @@
         "swoole"
     ],
     "require": {
-        "php": ">=7.2"
+        "php": ">=7.2",
+        "phpunit/phpunit": "~8.0 || ~9.0"
     },
     "require-dev": {
-        "phpunit/phpunit": "~8.0 || ~9.0",
         "swoole/ide-helper": ">=4.6"
     },
     "bin": [
