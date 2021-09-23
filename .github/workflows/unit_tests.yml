@@ -25,6 +25,7 @@ jobs:
       - name: Run Unit Tests
         run: |
           set -ex
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --version"
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit"
           docker exec -t $(docker ps -qf "name=php")    sh -c "./counit"
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit"

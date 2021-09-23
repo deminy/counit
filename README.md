@@ -114,6 +114,11 @@ using multiprocessing:
 * Package [pestphp/pest](https://pestphp.com)
 * Package [brianium/paratest](https://github.com/paratestphp/paratest)
 
+# TODOs
+
+* Update examples and documentation.
+* Better integration with PHPUnit.
+
 # License
 
 MIT license.
