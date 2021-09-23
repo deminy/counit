@@ -24,7 +24,7 @@ class Counit
      */
     public static function create(callable $callable, int $count = 0): int
     {
-        if (self::isCoroutineFriendly()) {
+        if (Helper::isCoroutineFriendly()) {
             if ($count > 0) {
                 $trace = debug_backtrace();
                 if (!empty($trace[1]['object']) && ($trace[1]['object'] instanceof TestCase)) {
@@ -50,18 +50,10 @@ class Counit
      */
     public static function sleep(int $seconds): void
     {
-        if (self::isCoroutineFriendly()) {
+        if (Helper::isCoroutineFriendly()) {
             Coroutine::sleep($seconds);
         } else {
             \sleep($seconds);
         }
-    }
-
-    /**
-     * Check to see if running unit tests using counit, with the Swoole extension enabled.
-     */
-    protected static function isCoroutineFriendly(): bool
-    {
-        return extension_loaded('swoole') && (Coroutine::getCid() !== -1);
     }
 }
