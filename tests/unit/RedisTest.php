@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
-use Deminy\Counit\TestKey;
+use Deminy\Counit\Helper;
 use PHPUnit\Framework\TestCase;
 use Redis;
 
@@ -35,7 +35,7 @@ class RedisTest extends TestCase
                 $redis = new Redis();
                 $redis->connect('redis');
 
-                $key = TestKey::getNewKey();
+                $key = Helper::getNewKey();
                 $redis->setex($key, $seconds, 'dummy');
                 self::assertSame('dummy', $redis->get($key), 'The new entry should have been added successfully.');
                 Counit::sleep($seconds + 1);
