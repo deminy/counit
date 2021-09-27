@@ -19,9 +19,9 @@ jobs:
       - name: Setup Services
         run: |
           docker-compose up -d
-          docker ps
           docker exec -t $(docker ps -qf "name=swoole") sh -c "composer require phpunit/phpunit ${{ matrix.phpunit }} --dev -nq --no-progress"
-          sleep 5 # Seems that we need to give the MySQL container enough time to warm up.
+          sleep 15 # Seems that we need to give the MySQL container enough time to warm up.
+          docker ps
 
       - name: Run Unit Tests
         run: |
