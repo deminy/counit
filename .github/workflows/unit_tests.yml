@@ -18,17 +18,26 @@ jobs:
 
       - name: Setup Services
         run: |
-          docker-compose up --build -d
-          docker ps -a
+          docker-compose up -d
+          docker ps
           docker exec -t $(docker ps -qf "name=swoole") sh -c "composer require phpunit/phpunit ${{ matrix.phpunit }} --dev -n"
 
       - name: Run Unit Tests
         run: |
           set -ex
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --version"
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit"
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit"
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit"
+
+          docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite global"
+          docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite global"
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+
+          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite global"
+          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite case-by-case"
+
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite global"
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite case-by-case"
 
       - name: Stop and Remove Docker Containers
         run: docker-compose down

@@ -2,22 +2,27 @@ version: '3.8'
 
 services:
   php:
-    build:
-      context: .
-      dockerfile: ./php.Dockerfile
+    image: deminy/counit:php-only
     tty: true
     links:
+      - mysql
       - redis
     volumes:
       - ./:/var/www
   swoole:
-    build:
-      context: .
-      dockerfile: ./swoole.Dockerfile
+    image: deminy/counit:swoole-enabled
     tty: true
     links:
+      - mysql
       - redis
     volumes:
       - ./:/var/www
+  mysql:
+    image: mysql
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_USER: username
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: password
   redis:
     image: redis

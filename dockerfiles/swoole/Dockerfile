@@ -6,5 +6,6 @@ RUN set -ex \
     pecl update-channels && \
     pecl install redis-5.3.4 && \
     docker-php-ext-enable redis && \
+    docker-php-ext-install mysqli pdo_mysql && \
     apk del .build-deps && \
     rm -rf /var/cache/apk/* /tmp/*
