@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace Deminy\Counit\Tests;
 
-use Deminy\Counit\Counit;
-use PHPUnit\Framework\TestCase;
+use Deminy\Counit\TestCase;
 
 /**
  * @internal
@@ -28,15 +27,10 @@ class SleepTest extends TestCase
      */
     public function testSleep(int $seconds, string $message): void
     {
-        Counit::create(
-            function () use ($seconds, $message) {
-                $startTime = time();
-                Counit::sleep($seconds);
-                $endTime = time();
+        $startTime = time();
+        sleep($seconds);
+        $endTime = time();
 
-                self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
-            },
-            1 // The wrapped function call has one delayed assertion in it.
-        );
+        self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
     }
 }

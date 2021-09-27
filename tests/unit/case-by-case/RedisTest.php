@@ -11,7 +11,7 @@ use Redis;
 
 /**
  * @internal
- * @covers \Deminy\Counit\Counit
+ * @coversNothing
  */
 class RedisTest extends TestCase
 {

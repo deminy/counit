@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit backupGlobals="false" bootstrap="tests/bootstrap.php" verbose="true">
-    <testsuite name="default">
-        <directory suffix="Test.php">tests/unit</directory>
-    </testsuite>
+    <testsuites>
+        <testsuite name="case-by-case">
+            <directory suffix="Test.php">tests/unit/case-by-case</directory>
+        </testsuite>
+        <testsuite name="global">
+            <directory suffix="Test.php">tests/unit/global</directory>
+        </testsuite>
+    </testsuites>
     <extensions>
         <extension class="Deminy\Counit\CounitExtension"/>
     </extensions>
