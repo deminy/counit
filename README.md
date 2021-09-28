@@ -16,7 +16,7 @@ Table of Contents
 * [Examples](#examples)
    * [Setup Test Environment](#setup-test-environment)
    * [The "global" Style](#the-global-style-recommended)
-   * [The "Case by Case" Style](#the-case-by-case-style)
+   * [The "case by case" Style](#the-case-by-case-style)
    * [Comparisons](#comparisons)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
@@ -26,13 +26,30 @@ Table of Contents
 
 # How Does It Work
 
-Package _counit_ allows running multiple time/IO related tests concurrently within a single PHP process using Swoole. If you
-would like to know how exactly it works, I'd recommend checking this free online talk: [CSP Programming in PHP](https://nomadphp.com/video/306/csp-programming-in-php) (and here are the [slides](http://talks.deminy.in/csp.html)).
+Package _counit_ allows running multiple time/IO related tests concurrently within a single PHP process using Swoole. To know how exactly it works, I'd recommend checking this free online talk: [CSP Programming in PHP](https://nomadphp.com/video/306/csp-programming-in-php) (and here are the [slides](http://talks.deminy.in/csp.html)).
 
 Package _counit_ is compatible with _PHPUnit_, which means:
 
 1. Your test cases can be written in the same way as those for _PHPUnit_.
 2. Your test cases can run directly under _PHPUnit_.
+
+A typical test case of _counit_ looks like this:
+
+```php
+use Deminy\Counit\TestCase; // Here is the only change made for counit, comparing to test cases for PHPUnit.
+
+class SleepTest extends TestCase
+{
+  public function testSleep(): void
+  {
+    $startTime = time();
+    sleep(3);
+    $endTime = time();
+
+    self::assertEqualsWithDelta(3, ($endTime - $startTime), 1, 'The sleep() function call takes about 3 seconds to finish.');
+  }
+}
+```
 
 Comparing to _PHPUnit_, _counit_ could make your test cases faster. Here is a comparison when running the same test suite
 using _PHPUnit_ and _counit_ for a real project. In the test suite, many tests make calls to method
@@ -77,12 +94,12 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 
 # Use "counit" in Your Project
 
-1. Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests in one of the following two styles (details will be discussed in the next sections):
+* Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests in one of the following two styles (details will be discussed in the next sections):
   * **The global style (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/master/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class.
   * **The case-by-case style**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/master/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/master/src/Counit.php) instead of the PHP function _sleep()_.
-2. Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
-3. Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
-4. Optional steps:
+* Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
+* Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
+* Optional steps:
   * use PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/master/src/CounitExtension.php) as shown in file [phpunit.xml.dist](https://github.com/deminy/counit/blob/master/phpunit.xml.dist). This is to wait the whole test suite to finish before printing out the summary information at the end.
 
 # Examples
@@ -122,7 +139,7 @@ methods accordingly.
 A typical test case of the global style looks like this:
 
 ```php
-use Deminy\Counit\TestCase; // Comparing to test cases for PHPUnit, here is the only change made for counit.
+use Deminy\Counit\TestCase; // Here is the only change made for counit, comparing to test cases for PHPUnit.
 
 class SleepTest extends TestCase
 {
@@ -139,7 +156,7 @@ class SleepTest extends TestCase
 
 To find more tests written in this style, please check tests under folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) (test suite "global").
 
-## The "Case by Case" Style
+## The "case by case" Style
 
 In this style, you make changes directly on a test case to make it work asynchronously. 
 
