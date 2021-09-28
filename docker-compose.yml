@@ -7,6 +7,7 @@ services:
     links:
       - mysql
       - redis
+      - web
     volumes:
       - ./:/var/www
   swoole:
@@ -15,6 +16,7 @@ services:
     links:
       - mysql
       - redis
+      - web
     volumes:
       - ./:/var/www
   mysql:
@@ -26,3 +28,7 @@ services:
       MYSQL_ROOT_PASSWORD: password
   redis:
     image: redis
+  web:
+    image: phpswoole/swoole
+    volumes:
+      - ./tests/server.php:/var/www/server.php

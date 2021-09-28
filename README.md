@@ -107,6 +107,7 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 Folder [./tests/unit](https://github.com/deminy/counit/tree/master/tests/unit) contains some sample tests, where we
 have following time-related tests included:
 
+* Test slow HTTP requests.
 * Test long-running MySQL queries.
 * Test data expiration in Redis.
 * Test _sleep()_ function calls in PHP.
@@ -120,8 +121,8 @@ docker-compose up -d
 docker exec -ti $(docker ps -qf "name=swoole") sh -c "composer install -n"
 ```
 
-There are four containers started: a PHP container, a Swoole container, a Redis container, and a MySQL container. The
-PHP container doesn't have the Swoole extension installed, while the Swoole container has it installed and enabled.
+There are five containers started: a PHP container, a Swoole container, a Redis container, a MySQL container, and a web
+server. The PHP container doesn't have the Swoole extension installed, while the Swoole container has it installed and enabled.
 
 As said previously, test cases can be written in the same way as those for _PHPUnit_. However, to run time/IO related
 tests faster with _counit_, we need to make some adjustments when writing those test cases; these adjustments can be
@@ -267,13 +268,13 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
   <tr>
     <td rowspan="2"><strong>counit (without Swoole), or PHPUnit</strong></td>
     <td>global</td>
-    <td rowspan="4">12</td>
     <td rowspan="4">16</td>
+    <td rowspan="4">24</td>
     <td>37 seconds</td>
   </tr>
   <tr>
     <td>case by case</td>
-    <td>37 seconds</td>
+    <td>48 seconds</td>
   </tr>
   <tr>
     <td rowspan="2"><strong>counit (with Swoole enabled)</strong></td>
