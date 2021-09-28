@@ -270,7 +270,7 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
     <td>global</td>
     <td rowspan="4">16</td>
     <td rowspan="4">24</td>
-    <td>37 seconds</td>
+    <td>48 seconds</td>
   </tr>
   <tr>
     <td>case by case</td>
