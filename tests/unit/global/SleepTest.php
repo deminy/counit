@@ -23,7 +23,10 @@ class SleepTest extends TestCase
     }
 
     /**
+     * To test and see if the PHP function sleep() works as should.
+     *
      * @dataProvider dataSleep
+     * @covers \sleep()
      */
     public function testSleep(int $seconds, string $message): void
     {

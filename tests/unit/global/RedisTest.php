@@ -25,7 +25,10 @@ class RedisTest extends TestCase
     }
 
     /**
+     * To test and see if the PHP method \Redis::setex() has TTL set as expected.
+     *
      * @dataProvider dataRedis
+     * @covers \Redis::setex
      */
     public function testRedis(int $seconds, string $message): void
     {

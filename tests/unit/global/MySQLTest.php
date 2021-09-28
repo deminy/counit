@@ -24,6 +24,8 @@ class MySQLTest extends TestCase
     }
 
     /**
+     * To test and see if the MySQL function sleep() works as expected.
+     *
      * @dataProvider dataMySQL
      */
     public function testMySQL(int $seconds, string $message): void
