@@ -26,19 +26,29 @@ jobs:
       - name: Run Unit Tests
         run: |
           set -ex
+
+          # Check current version of PHPUnit.
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --version"
 
+          # Run tests using PHPUnit (Swoole is disabled).
           docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite global"
           docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite case-by-case"
 
+          # Run tests using PHPUnit, with Swoole enabled.
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite global"
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite case-by-case"
 
+          # Run tests using counit (Swoole is disabled).
           docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite global"
           docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite case-by-case"
 
+          # Run tests using counit, with Swoole enabled.
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite global"
           docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite case-by-case"
+
+          # Test compatibility with PHPUnit.
+          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite compatibility"
+          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite compatibility"
 
       - name: Stop and Remove Docker Containers
         run: docker-compose down

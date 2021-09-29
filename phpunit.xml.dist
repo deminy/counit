@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit backupGlobals="false" bootstrap="tests/bootstrap.php" verbose="true">
     <testsuites>
+        <testsuite name="global">
+            <directory suffix="Test.php">tests/unit/global</directory>
+        </testsuite>
         <testsuite name="case-by-case">
             <directory suffix="Test.php">tests/unit/case-by-case</directory>
         </testsuite>
-        <testsuite name="global">
-            <directory suffix="Test.php">tests/unit/global</directory>
+        <!-- Test suite "compatibility" is to test and check compatibility with PHPUnit. -->
+        <testsuite name="compatibility">
+            <directory>./tests/unit/compatibility</directory>
         </testsuite>
     </testsuites>
     <extensions>

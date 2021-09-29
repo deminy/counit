@@ -133,9 +133,7 @@ made in two different styles.
 In this style, each test case runs in a separate coroutine automatically.
 
 For test cases written in this style, the only change to make on your existing test cases is to use class
-_Deminy\Counit\TestCase_ instead of _PHPUnit\Framework\TestCase_ as the base class. However, if you have customized
-method _setUpBeforeClass()_ and _tearDownAfterClass()_ defined in your test cases, make sure that they call their parent
-methods accordingly.
+_Deminy\Counit\TestCase_ instead of _PHPUnit\Framework\TestCase_ as the base class.
 
 A typical test case of the global style looks like this:
 
@@ -154,6 +152,26 @@ class SleepTest extends TestCase
   }
 }
 ```
+
+When customized method _setUpBeforeClass()_ and _tearDownAfterClass()_ are defined in the test cases, please make sure
+to call their parent methods accordingly in these customized methods.
+
+This style assumes there is no immediate assertions in test cases, nor assertions before a sleep() function call or a
+coroutine-friendly IO operation. Test cases like following still work, but they will trigger some warning messages when
+tested:
+
+```php
+class SleepTest extends Deminy\Counit\TestCase
+{
+  public function testAssertionSuppression(): void
+  {
+    self::assertTrue(true, 'Trigger an immediate assertion.');
+    // ......
+  }
+}
+```
+
+We can rewrite this test class using the "case by case" style (discussed in the next section) to eliminate the warning messages.
 
 To find more tests written in this style, please check tests under folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) (test suite "global").
 
@@ -329,6 +347,7 @@ end up using multiprocessing:
 # TODOs
 
 * Better integration with _PHPUnit_.
+  * Deal with annotation _@doesNotPerformAssertions_ in the global style.
   * Make # of assertions consistent with the one reported from _PHPUnit_.
 * Better error/exception handling.
 
