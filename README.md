@@ -64,9 +64,9 @@ _\Deminy\Counit\Counit::sleep()_ to wait something to happen (e.g., wait data to
   </tr>
   <tr>
     <td><strong>counit (without Swoole), or PHPUnit</strong></td>
-    <td rowspan="2">20</td>
-    <td rowspan="2">310</td>
-    <td>3 minutes and 54 seconds</td>
+    <td rowspan="2">44</td>
+    <td rowspan="2">1148</td>
+    <td>9 minutes and 18 seconds</td>
   </tr>
   <tr>
     <td><strong>counit (with Swoole enabled)</strong></td>
@@ -161,7 +161,7 @@ coroutine-friendly IO operation. Test cases like following still work, but they 
 tested:
 
 ```php
-class SleepTest extends Deminy\Counit\TestCase
+class GlobalTest extends Deminy\Counit\TestCase
 {
   public function testAssertionSuppression(): void
   {
