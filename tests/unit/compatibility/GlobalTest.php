@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\TestCase;
+use Exception;
 
 /**
  * To test and check compatibility with PHPUnit.
@@ -42,5 +43,14 @@ class GlobalTest extends TestCase
         self::assertTrue(true, 'An immediate assertion is triggered when start running the test case.');
         sleep(1);
         self::assertTrue(true, 'A delayed assertion is triggered.');
+    }
+
+    /**
+     * To expect an exception thrown out.
+     */
+    public function testExpectedException(): void
+    {
+        self::expectException(Exception::class);
+        throw new Exception();
     }
 }

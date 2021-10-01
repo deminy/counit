@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
+use Exception;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -57,5 +58,14 @@ class CaseByCaseTest extends TestCase
             },
             1 // The wrapped function call has one delayed assertion in it.
         );
+    }
+
+    /**
+     * To expect an exception thrown out.
+     */
+    public function testExpectedException(): void
+    {
+        self::expectException(Exception::class);
+        throw new Exception();
     }
 }
