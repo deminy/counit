@@ -26,12 +26,11 @@ Table of Contents
 
 # How Does It Work
 
-Package _counit_ allows running multiple time/IO related tests concurrently within a single PHP process using Swoole. To know how exactly it works, I'd recommend checking this free online talk: [CSP Programming in PHP](https://nomadphp.com/video/306/csp-programming-in-php) (and here are the [slides](http://talks.deminy.in/csp.html)).
+Package _counit_ allows running multiple time/IO related tests concurrently within a single PHP process using Swoole.
+_Counit_ is compatible with _PHPUnit_, which means:
 
-Package _counit_ is compatible with _PHPUnit_, which means:
-
-1. Your test cases can be written in the same way as those for _PHPUnit_.
-2. Your test cases can run directly under _PHPUnit_.
+1. Test cases can be written in the same way as those for _PHPUnit_.
+2. Test cases can run directly under _PHPUnit_.
 
 A typical test case of _counit_ looks like this:
 
@@ -104,7 +103,7 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 
 # Examples
 
-Folder [./tests/unit](https://github.com/deminy/counit/tree/master/tests/unit) contains some sample tests, where we
+Folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) and [./tests/unit/case-by-case](https://github.com/deminy/counit/tree/master/tests/unit/case-by-case) contain some sample tests, where we
 have following time-related tests included:
 
 * Test slow HTTP requests.
@@ -337,8 +336,10 @@ docker build -t deminy/counit:swoole-enabled -f ./dockerfiles/swoole/Dockerfile 
 # Alternatives
 
 This package allows to use Swoole to run multiple time/IO related tests without multiprocessing, which means all tests
-can run within a single PHP process. In the PHP ecosystem, there are other options to run unit tests in parallel, most
-end up using multiprocessing:
+can run within a single PHP process. To understand how exactly it works, I'd recommend checking this free online talk:
+[CSP Programming in PHP](https://nomadphp.com/video/306/csp-programming-in-php) (and here are the [slides](http://talks.deminy.in/csp.html)).
+
+In the PHP ecosystem, there are other options to run unit tests in parallel, most end up using multiprocessing:
 
 * Process isolation in PHPUnit. This allows to run tests in separate PHP processes.
 * Package [brianium/paratest](https://github.com/paratestphp/paratest)
