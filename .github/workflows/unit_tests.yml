@@ -6,11 +6,11 @@ jobs:
   ci:
     runs-on: ubuntu-22.04
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         phpunit: ["~8.0.0", "~8.0", "~9.0.0", "~9.0"]
 
-    name: Run Unit Tests With PHPUnit ${{ matrix.phpunit }}
+    name: Run Tests With PHPUnit ${{ matrix.phpunit }}
 
     steps:
       - name: Checkout
@@ -47,7 +47,3 @@ jobs:
           # Run tests using counit, with Swoole enabled.
           docker compose exec -T swoole ./counit --testsuite global
           docker compose exec -T swoole ./counit --testsuite case-by-case
-
-          # Test compatibility with PHPUnit.
-          docker compose exec -T php    ./counit --testsuite compatibility
-          docker compose exec -T swoole ./counit --testsuite compatibility

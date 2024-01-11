@@ -1,0 +1,40 @@
+name: Compatibility Tests
+
+on: [ push, pull_request, workflow_dispatch ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - {phpunit: "~8.0.0", php: "7.4"}
+          - {phpunit: "~8.0", php: "7.4"}
+          - {phpunit: "~8.0", php: "8.2"} # TODO: update to PHP 8.3.
+          - {phpunit: "~9.0.0", php: "7.4"}
+          - {phpunit: "~9.0", php: "7.4"}
+          - {phpunit: "~9.0", php: "8.2"} # TODO: update to PHP 8.3.
+        extensions:
+          - swoole-stable
+          - ""
+
+    name: PHPUnit ${{ matrix.env.phpunit }} on PHP ${{ matrix.env.php }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.env.php }}
+          tools: composer:v2
+          extensions: ${{ matrix.extensions }}
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install -nq --no-progress
+
+      - name: Test Compatibility with PHPUnit
+        run: ./counit --testsuite compatibility
