@@ -17,4 +17,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Syntax Checks
-        run: docker run -q --rm -v "$(pwd):/project" -w /project -i jakzal/phpqa:php${{ matrix.php }} phplint src tests ./counit
+        run: |
+          set -ex
+          if [[ ${{ matrix.php }} == '7.3' ]] ; then
+            docker run -q --rm -v "$(pwd)/src:/data" -i cytopia/phplint:${{ matrix.php }}
+          else
+            docker run -q --rm -v "$(pwd):/project" -w /project -i jakzal/phpqa:php${{ matrix.php }} phplint src tests ./counit
+          fi
