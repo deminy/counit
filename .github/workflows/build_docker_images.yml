@@ -35,6 +35,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./dockerfiles/${{ matrix.docker.type }}
-          platforms: linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: deminy/counit:${{ matrix.docker.tag }}
