@@ -13,6 +13,9 @@ use PHPUnit\Framework\TestCase;
  */
 class CurlTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataCurl(): array
     {
         return [
@@ -33,6 +36,9 @@ class CurlTest extends TestCase
         Counit::create(
             function () use ($seconds, $message) {
                 $ch = curl_init("http://web:9501?seconds={$seconds}");
+                if ($ch === false) {
+                    self::fail('The curl resource is invalid.');
+                }
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 
                 $startTime = time();

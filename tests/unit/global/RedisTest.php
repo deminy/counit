@@ -13,6 +13,9 @@ use Deminy\Counit\TestCase;
  */
 class RedisTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataRedis(): array
     {
         return [

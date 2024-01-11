@@ -13,6 +13,9 @@ use PHPUnit\Framework\TestCase;
  */
 class SleepTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataSleep(): array
     {
         return [

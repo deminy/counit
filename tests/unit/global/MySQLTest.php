@@ -12,6 +12,9 @@ use Deminy\Counit\TestCase;
  */
 class MySQLTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataMySQL(): array
     {
         return [
@@ -31,6 +34,9 @@ class MySQLTest extends TestCase
     {
         $mysqli = new \mysqli('mysql', 'username', 'password', 'test');
         $stmt   = $mysqli->prepare("SELECT SLEEP({$seconds})");
+        if ($stmt === false) {
+            self::fail('The MySQL statement is invalid.');
+        }
 
         $startTime = time();
         $stmt->execute();

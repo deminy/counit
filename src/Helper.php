@@ -11,7 +11,7 @@ class Helper
     /**
      * @var string
      */
-    protected static $prefix;
+    protected static $prefix = '';
 
     /**
      * @var int
@@ -28,7 +28,7 @@ class Helper
 
     public static function getNewKey(): string
     {
-        if (!isset(self::$prefix)) {
+        if (empty(self::$prefix)) {
             self::initPrefix();
         }
         return self::$prefix . (++self::$counter);
@@ -51,9 +51,9 @@ class Helper
         return $keys;
     }
 
-    protected static function initPrefix(?string $prefix = null): void
+    protected static function initPrefix(string $prefix = ''): void
     {
-        if (!isset($prefix)) {
+        if (empty($prefix)) {
             $prefix = uniqid('test-key-') . '-' . getmypid() . '-';
         }
         self::$prefix = $prefix;

@@ -14,20 +14,23 @@ use Swoole\Coroutine;
  */
 class TestCase extends BaseTestCase
 {
-    protected static $coroutineOptions;
+    /**
+     * @var array<string, mixed>
+     */
+    protected static $coroutineOptions = [];
 
     public static function setUpBeforeClass(): void
     {
         parent::setUpBeforeClass();
         if (Helper::isCoroutineFriendly()) {
-            static::$coroutineOptions = Coroutine::getOptions();
+            static::$coroutineOptions = Coroutine::getOptions() ?? [];
             Coroutine::set([Constant::OPTION_HOOK_FLAGS => SWOOLE_HOOK_ALL]);
         }
     }
 
     public static function tearDownAfterClass(): void
     {
-        if (Helper::isCoroutineFriendly()) {
+        if (Helper::isCoroutineFriendly() && !empty(static::$coroutineOptions)) {
             Coroutine::set(static::$coroutineOptions);
         }
         parent::setUpBeforeClass();

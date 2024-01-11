@@ -20,7 +20,7 @@ class CounitExtension implements AfterLastTestHook
         if (Helper::isCoroutineFriendly()) {
             // When the only coroutine left is the one created in script /counit, it means all the tests are finally
             // done, and it's time to hand it over to PHPUnit to take care of the rest part.
-            while (Coroutine::stats()['coroutine_num'] > 1) {
+            while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
                 Coroutine::sleep(0.2);
             }
         }

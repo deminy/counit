@@ -37,7 +37,7 @@ class Counit
             }
 
             $id = Coroutine::create($callable);
-            return ($id !== false) ? $id : -1;
+            return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
         }
 
         $callable();

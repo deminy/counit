@@ -1,0 +1,8 @@
+# Usage:
+#   docker run --rm -v $(pwd):/var/www -ti phpswoole/swoole:4.8-php7.4 ./vendor/bin/phpstan analyse --no-progress
+#
+parameters:
+  level: 9
+  paths:
+    - ./src
+    - ./tests

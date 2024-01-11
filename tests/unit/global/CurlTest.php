@@ -12,6 +12,9 @@ use Deminy\Counit\TestCase;
  */
 class CurlTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataCurl(): array
     {
         return [
@@ -30,6 +33,9 @@ class CurlTest extends TestCase
     public function testCurl(int $seconds, string $message): void
     {
         $ch = curl_init("http://web:9501?seconds={$seconds}");
+        if ($ch === false) {
+            self::fail('The curl resource is invalid.');
+        }
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 
         $startTime = time();

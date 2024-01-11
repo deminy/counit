@@ -13,6 +13,9 @@ use PHPUnit\Framework\TestCase;
  */
 class MySQLTest extends TestCase
 {
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
     public function dataRedis(): array
     {
         return [
@@ -32,6 +35,9 @@ class MySQLTest extends TestCase
             function () use ($seconds, $message) {
                 $mysqli = new \mysqli('mysql', 'username', 'password', 'test');
                 $stmt   = $mysqli->prepare("SELECT SLEEP({$seconds})");
+                if ($stmt === false) {
+                    self::fail('The MySQL statement is invalid.');
+                }
 
                 $startTime = time();
                 $stmt->execute();
