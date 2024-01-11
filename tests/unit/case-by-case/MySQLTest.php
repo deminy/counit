@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
-use mysqli;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -31,8 +30,8 @@ class MySQLTest extends TestCase
     {
         Counit::create(
             function () use ($seconds, $message) {
-                $mysqli = new mysqli('mysql', 'username', 'password', 'test');
-                $stmt = $mysqli->prepare("SELECT SLEEP({$seconds})");
+                $mysqli = new \mysqli('mysql', 'username', 'password', 'test');
+                $stmt   = $mysqli->prepare("SELECT SLEEP({$seconds})");
 
                 $startTime = time();
                 $stmt->execute();

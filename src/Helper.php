@@ -51,7 +51,7 @@ class Helper
         return $keys;
     }
 
-    protected static function initPrefix(string $prefix = null): void
+    protected static function initPrefix(?string $prefix = null): void
     {
         if (!isset($prefix)) {
             $prefix = uniqid('test-key-') . '-' . getmypid() . '-';

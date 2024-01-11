@@ -7,7 +7,6 @@ namespace Deminy\Counit\Tests;
 use Deminy\Counit\Counit;
 use Deminy\Counit\Helper;
 use PHPUnit\Framework\TestCase;
-use Redis;
 
 /**
  * @internal
@@ -32,7 +31,7 @@ class RedisTest extends TestCase
     {
         Counit::create(
             function () use ($seconds, $message) {
-                $redis = new Redis();
+                $redis = new \Redis();
                 $redis->connect('redis');
 
                 $key = Helper::getNewKey();

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\TestCase;
-use mysqli;
 
 /**
  * @internal
@@ -30,7 +29,7 @@ class MySQLTest extends TestCase
      */
     public function testMySQL(int $seconds, string $message): void
     {
-        $mysqli = new mysqli('mysql', 'username', 'password', 'test');
+        $mysqli = new \mysqli('mysql', 'username', 'password', 'test');
         $stmt   = $mysqli->prepare("SELECT SLEEP({$seconds})");
 
         $startTime = time();

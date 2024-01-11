@@ -65,7 +65,7 @@ class CaseByCaseTest extends TestCase
      */
     public function testExpectedException(): void
     {
-        self::expectException(Exception::class);
-        throw new Exception();
+        self::expectException(\Exception::class);
+        throw new \Exception();
     }
 }

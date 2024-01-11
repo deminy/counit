@@ -6,7 +6,6 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Helper;
 use Deminy\Counit\TestCase;
-use Redis;
 
 /**
  * @internal
@@ -32,7 +31,7 @@ class RedisTest extends TestCase
      */
     public function testRedis(int $seconds, string $message): void
     {
-        $redis = new Redis();
+        $redis = new \Redis();
         $redis->connect('redis');
 
         $key = Helper::getNewKey();
