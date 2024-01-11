@@ -8,6 +8,6 @@ RUN set -ex \
     docker-php-ext-enable redis && \
     docker-php-ext-install mysqli pdo_mysql && \
     apk del .build-deps && \
-    rm -rf /var/cache/apk/* /tmp/*
+    rm -rf /var/cache/apk/*
 
 WORKDIR "/var/www/"
