@@ -15,6 +15,8 @@ jobs:
           - {type: "php", tag: "php-only"}
           - {type: "swoole", tag: "swoole-enabled"}
 
+    name: build image deminy/counit:${{ matrix.docker.tag }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

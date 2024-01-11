@@ -16,39 +16,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Services
+      - name: Start Docker Containers
+        uses: isbang/compose-action@v1.5.1
+
+      - name: Install Dependencies
         run: |
-          docker-compose up -d
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "composer require phpunit/phpunit ${{ matrix.phpunit }} -nq --no-progress"
+          set -ex
+
           sleep 15 # Seems that we need to give the MySQL container enough time to warm up.
-          docker ps
+
+          docker compose exec -T swoole composer require "phpunit/phpunit=${{ matrix.phpunit }}" -W -nq --no-progress
+          docker compose exec -T swoole ./vendor/bin/phpunit --version # Check current version of PHPUnit.
 
       - name: Run Unit Tests
         run: |
           set -ex
 
-          # Check current version of PHPUnit.
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --version"
-
           # Run tests using PHPUnit (Swoole is disabled).
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite global"
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+          docker compose exec -T php ./vendor/bin/phpunit --testsuite global
+          docker compose exec -T php ./vendor/bin/phpunit --testsuite case-by-case
 
           # Run tests using PHPUnit, with Swoole enabled.
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite global"
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite global
+          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite case-by-case
 
           # Run tests using counit (Swoole is disabled).
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite global"
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite case-by-case"
+          docker compose exec -T php ./counit --testsuite global
+          docker compose exec -T php ./counit --testsuite case-by-case
 
           # Run tests using counit, with Swoole enabled.
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite global"
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite case-by-case"
+          docker compose exec -T swoole ./counit --testsuite global
+          docker compose exec -T swoole ./counit --testsuite case-by-case
 
           # Test compatibility with PHPUnit.
-          docker exec -t $(docker ps -qf "name=php")    sh -c "./counit --testsuite compatibility"
-          docker exec -t $(docker ps -qf "name=swoole") sh -c "./counit --testsuite compatibility"
-
-      - name: Stop and Remove Docker Containers
-        run: docker-compose down
+          docker compose exec -T php    ./counit --testsuite compatibility
+          docker compose exec -T swoole ./counit --testsuite compatibility

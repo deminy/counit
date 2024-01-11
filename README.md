@@ -117,7 +117,7 @@ To run the sample tests, please start the Docker containers and install Composer
 
 ```bash
 docker-compose up -d
-docker exec -ti $(docker ps -qf "name=swoole") sh -c "composer install -n"
+docker compose exec -ti swoole composer install -n
 ```
 
 There are five containers started: a PHP container, a Swoole container, a Redis container, a MySQL container, and a web
@@ -241,34 +241,34 @@ Here we will run the tests under different environments, with or without Swoole.
 
 ```bash
 # To run test suite "global":
-docker exec -ti $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite global"
+docker compose exec -ti php    ./vendor/bin/phpunit --testsuite global
 # or,
-docker exec -ti $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite global"
+docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite global
 
 # To run test suite "case-by-case":
-docker exec -ti $(docker ps -qf "name=php")    sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+docker compose exec -ti php    ./vendor/bin/phpunit --testsuite case-by-case
 # or,
-docker exec -ti $(docker ps -qf "name=swoole") sh -c "./vendor/bin/phpunit --testsuite case-by-case"
+docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite case-by-case
 ```
 
 `#2` Run the test suites using _counit_ (without Swoole):
 
 ```bash
 # To run test suite "global":
-docker exec -ti $(docker ps -qf "name=php")    sh -c "./counit --testsuite global"
+docker compose exec -ti php    ./counit --testsuite global
 
 # To run test suite "case-by-case":
-docker exec -ti $(docker ps -qf "name=php")    sh -c "./counit --testsuite case-by-case"
+docker compose exec -ti php    ./counit --testsuite case-by-case
 ```
 
 `#3` Run the test suites using _counit_  (with extension Swoole enabled):
 
 ```bash
 # To run test suite "global":
-docker exec -ti $(docker ps -qf "name=swoole") sh -c "./counit --testsuite global"
+docker compose exec -ti swoole ./counit --testsuite global
 
 # To run test suite "case-by-case":
-docker exec -ti $(docker ps -qf "name=swoole") sh -c "./counit --testsuite case-by-case"
+docker compose exec -ti swoole ./counit --testsuite case-by-case
 ```
 
 The first two sets of commands take about same amount of time to finish. The last set of commands uses _counit_ and runs
