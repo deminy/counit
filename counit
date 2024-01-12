@@ -89,21 +89,23 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
+// Swoole is enabled? Then try to run unit tests in parallel using different coroutines!
 if (extension_loaded('swoole')) {
     Swoole\Coroutine::set(
         [
-            'exit_condition' => function () {
+            'exit_condition' => function (): bool {
                 return Swoole\Coroutine::stats()['coroutine_num'] === 0;
             },
         ]
     );
 
     $code = 0;
-    Swoole\Coroutine\run(function () use (&$code) {
+    Swoole\Coroutine\run(function () use (&$code): void {
         $code = PHPUnit\TextUI\Command::main(false);
         Swoole\Timer::clearAll();
     });
     exit($code);
 }
 
+// Swoole is not installed or enabled? Then just run unit tests directly as in PHPUnit!
 PHPUnit\TextUI\Command::main();
