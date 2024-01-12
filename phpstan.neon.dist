@@ -1,5 +1,10 @@
-# Usage:
-#   docker run --rm -v $(pwd):/var/www -ti phpswoole/swoole:4.8-php7.4 ./vendor/bin/phpstan analyse --no-progress
+# The PHPStan configuration file.
+#
+# To run static analysis locally with PHPStan, please start a container first:
+#     docker run --rm -v $(pwd):/var/www -ti phpswoole/swoole:5.1-php8.1 bash
+# Then run the following commands inside the container:
+#     composer global require phpstan/phpstan=^1.11.x-dev -n -q --no-progress
+#     /root/.composer/vendor/bin/phpstan analyse --no-progress
 #
 parameters:
   level: 9
