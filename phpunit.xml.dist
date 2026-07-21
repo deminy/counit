@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit backupGlobals="false" bootstrap="tests/bootstrap.php" verbose="true">
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/13.0/phpunit.xsd"
+         backupGlobals="false"
+         bootstrap="tests/bootstrap.php">
     <testsuites>
         <testsuite name="global">
             <directory suffix="Test.php">tests/unit/global</directory>
@@ -13,6 +16,6 @@
         </testsuite>
     </testsuites>
     <extensions>
-        <extension class="Deminy\Counit\CounitExtension"/>
+        <bootstrap class="Deminy\Counit\CounitExtension"/>
     </extensions>
 </phpunit>

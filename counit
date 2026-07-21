@@ -24,11 +24,11 @@ if (!version_compare(PHP_VERSION, PHP_VERSION, '=')) {
     die(1);
 }
 
-if (version_compare('7.2.0', PHP_VERSION, '>')) {
+if (version_compare('8.4.1', PHP_VERSION, '>')) {
     fwrite(
         STDERR,
         sprintf(
-            'This version of PHPUnit requires PHP >= 7.2.' . PHP_EOL .
+            'This version of PHPUnit requires PHP >= 8.4.1.' . PHP_EOL .
             'You are using PHP %s (%s).' . PHP_EOL,
             PHP_VERSION,
             PHP_BINARY
@@ -101,11 +101,14 @@ if (extension_loaded('swoole')) {
 
     $code = 0;
     Swoole\Coroutine\run(function () use (&$code): void {
-        $code = PHPUnit\TextUI\Command::main(false);
+        // PHPUnit 10 removed PHPUnit\TextUI\Command; PHPUnit\TextUI\Application::run() is the
+        // replacement. It returns the exit code instead of calling exit() itself, so it is safe
+        // to invoke inside a coroutine.
+        $code = (new PHPUnit\TextUI\Application())->run($_SERVER['argv']);
         Swoole\Timer::clearAll();
     });
     exit($code);
 }
 
 // Swoole is not installed or enabled? Then just run unit tests directly as in PHPUnit!
-PHPUnit\TextUI\Command::main();
+exit((new PHPUnit\TextUI\Application())->run($_SERVER['argv']));

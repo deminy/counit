@@ -13,9 +13,9 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: 8.1
+          php-version: 8.4
           tools: composer:v2
-          extensions: redis-stable, swoole-5.1.1
+          extensions: redis, swoole
           coverage: none
 
       - name: Install PHPStan
@@ -23,7 +23,7 @@ jobs:
         with:
           timeout_minutes: 5
           max_attempts: 5
-          command: composer require phpstan/phpstan=^1.11.x-dev -n -q --no-progress
+          command: composer require phpstan/phpstan=^1.12 -n -q --no-progress
 
       - name: Run Static Analysis
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit 2G
