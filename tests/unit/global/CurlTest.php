@@ -15,6 +15,26 @@ use PHPUnit\Framework\Attributes\DataProvider;
 class CurlTest extends TestCase
 {
     /**
+     * To test and see if the curl extension works as expected.
+     */
+    #[DataProvider('dataCurl')]
+    public function testCurl(int $seconds, string $message): void
+    {
+        $ch = curl_init("http://web:9501?seconds={$seconds}");
+        if ($ch === false) {
+            self::fail('The curl resource is invalid.');
+        }
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+        $startTime = time();
+        $body      = curl_exec($ch);
+        $endTime   = time();
+
+        self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
+        self::assertSame('OK', $body, "{$message} The response is OK.");
+    }
+
+    /**
      * @return array<array{0: int, 1: string}>
      */
     public static function dataCurl(): array
@@ -25,25 +45,5 @@ class CurlTest extends TestCase
             [3, 'The web server sends a response back in 3 seconds.'],
             [5, 'The web server sends a response back in 5 seconds.'],
         ];
-    }
-
-    /**
-     * To test and see if the curl extension works as expected.
-     */
-    #[DataProvider('dataCurl')]
-    public function testCurl(int $seconds, string $message): void
-    {
-        $ch = curl_init("http://web:9501?seconds={$seconds}");
-        if ($ch === false) {
-            self::fail('The curl resource is invalid.');
-        }
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-
-        $startTime = time();
-        $body      = curl_exec($ch);
-        $endTime   = time();
-
-        self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
-        self::assertSame('OK', $body, "{$message} The response is OK.");
     }
 }

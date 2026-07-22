@@ -15,19 +15,6 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 class MySQLTest extends TestCase
 {
-    /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public static function dataRedis(): array
-    {
-        return [
-            [1, 'MySQL sends a response back in 1 second.'],
-            [2, 'MySQL sends a response back in 2 seconds.'],
-            [3, 'MySQL sends a response back in 3 seconds.'],
-            [5, 'MySQL sends a response back in 5 seconds.'],
-        ];
-    }
-
     #[DataProvider('dataRedis')]
     public function testRedis(int $seconds, string $message): void
     {
@@ -49,5 +36,18 @@ class MySQLTest extends TestCase
             },
             1 // The wrapped function call has one delayed assertion in it.
         );
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public static function dataRedis(): array
+    {
+        return [
+            [1, 'MySQL sends a response back in 1 second.'],
+            [2, 'MySQL sends a response back in 2 seconds.'],
+            [3, 'MySQL sends a response back in 3 seconds.'],
+            [5, 'MySQL sends a response back in 5 seconds.'],
+        ];
     }
 }

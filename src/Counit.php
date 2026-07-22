@@ -76,7 +76,10 @@ class Counit
                 try {
                     $callable();
                 } catch (\Throwable $e) {
-                    if ($alreadyReturned) {
+                    // PHPStan sees only the value $alreadyReturned holds when the closure is
+                    // created; it is flipped to true (by reference) below, before a coroutine
+                    // that yielded resumes and can reach this catch block.
+                    if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
                         self::$deferredFailures[$description] = $e;
                     } else {
                         $caught = $e;

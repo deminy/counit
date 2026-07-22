@@ -15,19 +15,6 @@ use PHPUnit\Framework\TestCase;
 #[CoversNothing]
 class SleepTest extends TestCase
 {
-    /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public static function dataSleep(): array
-    {
-        return [
-            [1, '1 second has elapsed.'],
-            [2, '2 seconds have elapsed.'],
-            [3, '3 seconds have elapsed.'],
-            [5, '5 seconds have elapsed.'],
-        ];
-    }
-
     #[DataProvider('dataSleep')]
     public function testSleep(int $seconds, string $message): void
     {
@@ -41,5 +28,18 @@ class SleepTest extends TestCase
             },
             1 // The wrapped function call has one delayed assertion in it.
         );
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public static function dataSleep(): array
+    {
+        return [
+            [1, '1 second has elapsed.'],
+            [2, '2 seconds have elapsed.'],
+            [3, '3 seconds have elapsed.'],
+            [5, '5 seconds have elapsed.'],
+        ];
     }
 }

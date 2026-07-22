@@ -25,7 +25,7 @@ final class CounitExtension implements Extension
 {
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
-        $facade->registerSubscriber(new class() implements ExecutionFinishedSubscriber {
+        $facade->registerSubscriber(new class implements ExecutionFinishedSubscriber {
             public function notify(ExecutionFinished $event): void
             {
                 if (Helper::isCoroutineFriendly()) {
