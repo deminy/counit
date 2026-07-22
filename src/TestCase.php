@@ -24,7 +24,11 @@ class TestCase extends BaseTestCase
         parent::setUpBeforeClass();
         if (Helper::isCoroutineFriendly()) {
             static::$coroutineOptions = Coroutine::getOptions() ?? [];
-            Coroutine::set([Constant::OPTION_HOOK_FLAGS => SWOOLE_HOOK_ALL]);
+            // Swoole only honors hook flags configured before the coroutine scheduler starts (the
+            // `counit` script sets the authoritative value; see Helper::coroutineHookFlags()), so
+            // this call is a no-op on current Swoole versions -- it is kept so the intended flags
+            // are stated wherever coroutine options are touched, should that behavior change.
+            Coroutine::set([Constant::OPTION_HOOK_FLAGS => Helper::coroutineHookFlags()]);
         }
     }
 

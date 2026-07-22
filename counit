@@ -93,6 +93,10 @@ require PHPUNIT_COMPOSER_INSTALL;
 if (extension_loaded('swoole')) {
     Swoole\Coroutine::set(
         [
+            // Swoole only honors hook flags configured before the coroutine scheduler starts, so
+            // they must be set here rather than from inside a test. See
+            // Deminy\Counit\Helper::coroutineHookFlags() for why STDIO/file hooks are excluded.
+            'hook_flags'     => Deminy\Counit\Helper::coroutineHookFlags(),
             'exit_condition' => function (): bool {
                 return Swoole\Coroutine::stats()['coroutine_num'] === 0;
             },
