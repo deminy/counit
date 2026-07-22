@@ -37,7 +37,7 @@ class TestCase extends BaseTestCase
         if (Helper::isCoroutineFriendly() && !empty(static::$coroutineOptions)) {
             Coroutine::set(static::$coroutineOptions);
         }
-        parent::setUpBeforeClass();
+        parent::tearDownAfterClass();
     }
 
     /**
