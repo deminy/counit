@@ -325,13 +325,8 @@ faster, with limitations apply. Here is a list of limitations of this package:
 
 # Local Development
 
-There are pre-built images [deminy/counit](https://hub.docker.com/r/deminy/counit) for running the sample tests. Here are
-the commands to build the images:
-
-```bash
-docker build -t deminy/counit:php-only       -f ./dockerfiles/php/Dockerfile    .
-docker build -t deminy/counit:swoole-enabled -f ./dockerfiles/swoole/Dockerfile .
-```
+Docker images used to run the sample tests are built locally via `docker-compose.yml`, which builds the `php` and
+`swoole` services from the Dockerfiles under `./dockerfiles`. See [Setup Test Environment](#setup-test-environment).
 
 # Alternatives
 

@@ -1,8 +1,7 @@
-version: '3.8'
-
 services:
   php:
-    image: deminy/counit:php-only
+    build:
+      context: ./dockerfiles/php
     tty: true
     links:
       - mysql
@@ -11,7 +10,8 @@ services:
     volumes:
       - ./:/var/www
   swoole:
-    image: deminy/counit:swoole-enabled
+    build:
+      context: ./dockerfiles/swoole
     tty: true
     links:
       - mysql

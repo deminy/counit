@@ -1,4 +1,6 @@
-FROM php:8.4-alpine
+ARG PHP_VERSION=8.5
+
+FROM php:${PHP_VERSION}-alpine
 
 RUN set -ex \
     apk update && \
