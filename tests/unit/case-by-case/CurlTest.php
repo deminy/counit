@@ -46,8 +46,6 @@ class CurlTest extends TestCase
                 $body      = curl_exec($ch);
                 $endTime   = time();
 
-                curl_close($ch);
-
                 self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
                 self::assertSame('OK', $body, "{$message} The response is OK.");
             },
