@@ -15,19 +15,6 @@ use PHPUnit\Framework\TestCase;
 class RedisTest extends TestCase
 {
     /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public function dataRedis(): array
-    {
-        return [
-            [1, 'The entry expires in 1 second.'],
-            [2, 'The entry expires in 2 seconds.'],
-            [3, 'The entry expires in 3 seconds.'],
-            [5, 'The entry expires in 5 seconds.'],
-        ];
-    }
-
-    /**
      * @dataProvider dataRedis
      */
     public function testRedis(int $seconds, string $message): void
@@ -47,5 +34,18 @@ class RedisTest extends TestCase
             },
             2 // The wrapped function call has two delayed assertions in it.
         );
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public function dataRedis(): array
+    {
+        return [
+            [1, 'The entry expires in 1 second.'],
+            [2, 'The entry expires in 2 seconds.'],
+            [3, 'The entry expires in 3 seconds.'],
+            [5, 'The entry expires in 5 seconds.'],
+        ];
     }
 }

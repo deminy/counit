@@ -13,19 +13,6 @@ use Deminy\Counit\TestCase;
 class SleepTest extends TestCase
 {
     /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public function dataSleep(): array
-    {
-        return [
-            [1, '1 second has elapsed.'],
-            [2, '2 seconds have elapsed.'],
-            [3, '3 seconds have elapsed.'],
-            [5, '5 seconds have elapsed.'],
-        ];
-    }
-
-    /**
      * To test and see if the PHP function sleep() works as should.
      *
      * @dataProvider dataSleep
@@ -38,5 +25,18 @@ class SleepTest extends TestCase
         $endTime = time();
 
         self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public function dataSleep(): array
+    {
+        return [
+            [1, '1 second has elapsed.'],
+            [2, '2 seconds have elapsed.'],
+            [3, '3 seconds have elapsed.'],
+            [5, '5 seconds have elapsed.'],
+        ];
     }
 }

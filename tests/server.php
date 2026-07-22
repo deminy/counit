@@ -1,5 +1,6 @@
 #!/usr/bin/env php
 <?php
+
 /**
  * This script is used to start a Dockerized web server for testing the curl extension under PHPUnit/counit. The web
  * server can send slow HTTP responses back to the client.

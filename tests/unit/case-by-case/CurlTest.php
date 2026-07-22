@@ -14,19 +14,6 @@ use PHPUnit\Framework\TestCase;
 class CurlTest extends TestCase
 {
     /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public function dataCurl(): array
-    {
-        return [
-            [1, 'The web server sends a response back in 1 second.'],
-            [2, 'The web server sends a response back in 2 seconds.'],
-            [3, 'The web server sends a response back in 3 seconds.'],
-            [5, 'The web server sends a response back in 5 seconds.'],
-        ];
-    }
-
-    /**
      * To test and see if the curl extension works as expected.
      *
      * @dataProvider dataCurl
@@ -52,5 +39,18 @@ class CurlTest extends TestCase
             },
             2 // The wrapped function call has two delayed assertions in it.
         );
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public function dataCurl(): array
+    {
+        return [
+            [1, 'The web server sends a response back in 1 second.'],
+            [2, 'The web server sends a response back in 2 seconds.'],
+            [3, 'The web server sends a response back in 3 seconds.'],
+            [5, 'The web server sends a response back in 5 seconds.'],
+        ];
     }
 }

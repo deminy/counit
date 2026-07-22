@@ -13,19 +13,6 @@ use Deminy\Counit\TestCase;
 class MySQLTest extends TestCase
 {
     /**
-     * @return array<array{0: int, 1: string}>
-     */
-    public function dataMySQL(): array
-    {
-        return [
-            [1, 'MySQL sends a response back in 1 second.'],
-            [2, 'MySQL sends a response back in 2 seconds.'],
-            [3, 'MySQL sends a response back in 3 seconds.'],
-            [5, 'MySQL sends a response back in 5 seconds.'],
-        ];
-    }
-
-    /**
      * To test and see if the MySQL function sleep() works as expected.
      *
      * @dataProvider dataMySQL
@@ -45,5 +32,18 @@ class MySQLTest extends TestCase
 
         $stmt->close();
         $mysqli->close();
+    }
+
+    /**
+     * @return array<array{0: int, 1: string}>
+     */
+    public function dataMySQL(): array
+    {
+        return [
+            [1, 'MySQL sends a response back in 1 second.'],
+            [2, 'MySQL sends a response back in 2 seconds.'],
+            [3, 'MySQL sends a response back in 3 seconds.'],
+            [5, 'MySQL sends a response back in 5 seconds.'],
+        ];
     }
 }
