@@ -94,9 +94,10 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 Please pick the _counit_ version matching the version of _PHPUnit_ used in your project:
 
 | counit | PHPUnit | PHP |
-|--------|-----------|-----------|
-| ~1.0.0 | ~13.0     | >= 8.4.1  |
-| ~0.2.0 | ~8.0, ~9.0 | >= 7.2   |
+|--------|--------------------|-----------|
+| ~1.0.0 | ~13.0              | >= 8.4.1  |
+| ~1.0.0 | ~12.5.24           | >= 8.3    |
+| ~0.2.0 | ~8.0, ~9.0         | >= 7.2    |
 
 # Use "counit" in Your Project
 

@@ -9,6 +9,7 @@ jobs:
       fail-fast: false
       matrix:
         env:
+          - {phpunit: "~12.5.24", php: "8.3"}
           - {phpunit: "~13.0", php: "8.4"}
         extensions:
           - swoole-stable
