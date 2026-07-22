@@ -116,7 +116,7 @@ have following time-related tests included:
 To run the sample tests, please start the Docker containers and install Composer packages first:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 docker compose exec -ti swoole composer install -n
 ```
 
