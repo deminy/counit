@@ -5,18 +5,20 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
+use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversNothing]
 class MySQLTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataRedis(): array
+    public static function dataRedis(): array
     {
         return [
             [1, 'MySQL sends a response back in 1 second.'],
@@ -26,9 +28,7 @@ class MySQLTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider dataRedis
-     */
+    #[DataProvider('dataRedis')]
     public function testRedis(int $seconds, string $message): void
     {
         Counit::create(

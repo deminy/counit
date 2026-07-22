@@ -5,18 +5,20 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
+use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversNothing]
 class SleepTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataSleep(): array
+    public static function dataSleep(): array
     {
         return [
             [1, '1 second has elapsed.'],
@@ -26,9 +28,7 @@ class SleepTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider dataSleep
-     */
+    #[DataProvider('dataSleep')]
     public function testSleep(int $seconds, string $message): void
     {
         Counit::create(

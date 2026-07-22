@@ -6,18 +6,20 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
 use Deminy\Counit\Helper;
+use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversNothing]
 class RedisTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataRedis(): array
+    public static function dataRedis(): array
     {
         return [
             [1, 'The entry expires in 1 second.'],
@@ -27,9 +29,7 @@ class RedisTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider dataRedis
-     */
+    #[DataProvider('dataRedis')]
     public function testRedis(int $seconds, string $message): void
     {
         Counit::create(

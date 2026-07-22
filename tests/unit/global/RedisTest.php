@@ -6,17 +6,19 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Helper;
 use Deminy\Counit\TestCase;
+use PHPUnit\Framework\Attributes\CoversMethod;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversMethod(\Redis::class, 'setex')]
 class RedisTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataRedis(): array
+    public static function dataRedis(): array
     {
         return [
             [1, 'The entry expires in 1 second.'],
@@ -28,10 +30,8 @@ class RedisTest extends TestCase
 
     /**
      * To test and see if the PHP method \Redis::setex() has TTL set as expected.
-     *
-     * @dataProvider dataRedis
-     * @covers \Redis::setex
      */
+    #[DataProvider('dataRedis')]
     public function testRedis(int $seconds, string $message): void
     {
         $redis = new \Redis();

@@ -5,17 +5,19 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\TestCase;
+use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversNothing]
 class MySQLTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataMySQL(): array
+    public static function dataMySQL(): array
     {
         return [
             [1, 'MySQL sends a response back in 1 second.'],
@@ -27,9 +29,8 @@ class MySQLTest extends TestCase
 
     /**
      * To test and see if the MySQL function sleep() works as expected.
-     *
-     * @dataProvider dataMySQL
      */
+    #[DataProvider('dataMySQL')]
     public function testMySQL(int $seconds, string $message): void
     {
         $mysqli = new \mysqli('mysql', 'username', 'password', 'test');

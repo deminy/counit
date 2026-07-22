@@ -5,18 +5,20 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
+use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @internal
- * @coversNothing
  */
+#[CoversNothing]
 class CurlTest extends TestCase
 {
     /**
      * @return array<array{0: int, 1: string}>
      */
-    public function dataCurl(): array
+    public static function dataCurl(): array
     {
         return [
             [1, 'The web server sends a response back in 1 second.'],
@@ -28,9 +30,8 @@ class CurlTest extends TestCase
 
     /**
      * To test and see if the curl extension works as expected.
-     *
-     * @dataProvider dataCurl
      */
+    #[DataProvider('dataCurl')]
     public function testCurl(int $seconds, string $message): void
     {
         Counit::create(
