@@ -107,6 +107,25 @@ if (extension_loaded('swoole')) {
         $code = (new PHPUnit\TextUI\Application())->run($_SERVER['argv']);
         Swoole\Timer::clearAll();
     });
+
+    // Counit::create() (used directly by "case-by-case" style tests, and by
+    // Deminy\Counit\TestCase::invokeTestMethod() for "global style" tests) wraps a callable in a
+    // coroutine so other tests can run concurrently while it's sleeping/waiting on IO. If that
+    // coroutine's assertion/exception happens *after* it had already yielded once (e.g. after a
+    // sleep() call), create() had already returned to its caller by then, so PHPUnit reported the
+    // test as passed before the failure actually happened; see Counit::$deferredFailures. Check
+    // for that here, once we're back in normal (non-coroutine) PHP -- calling exit() from inside a
+    // coroutine gets intercepted by Swoole itself and can't reliably override PHPUnit's own exit
+    // code -- and force the run to fail instead of letting that false "pass" stand uncorrected.
+    if (!empty(Deminy\Counit\Counit::$deferredFailures)) {
+        fwrite(STDERR, PHP_EOL . 'The following failures happened after their test had already been reported as passed' . PHP_EOL . '(the assertion/exception occurred after a sleep()/IO yield point):' . PHP_EOL . PHP_EOL);
+        foreach (Deminy\Counit\Counit::$deferredFailures as $testDescription => $throwable) {
+            fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
+        }
+        fwrite(STDERR, PHP_EOL);
+        $code = 1;
+    }
+
     exit($code);
 }
 

@@ -319,7 +319,7 @@ faster, with limitations apply. Here is a list of limitations of this package:
   work in blocking mode only, this package can't make their function calls faster. Here are some extensions that work in
   blocking mode only: _MongoDB_, _Couchbase_, and some ODBC drivers.
 * The package doesn't work exactly the same as when running under _PHPUnit_:
-  * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. Because of this, the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
+  * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. When that happens, _counit_ reports the failure at the end of the run and exits with a non-zero code, so the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
   * The # of assertions reported could be different from _PHPUnit_.
   * Some exceptions/errors are not handled/reported the same.
 

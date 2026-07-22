@@ -13,6 +13,21 @@ use Swoole\Coroutine;
 class Counit
 {
     /**
+     * Failures/errors thrown by a coroutine *after* create() already returned to its caller --
+     * meaning the caller (and, for tests, PHPUnit itself) already moved on assuming success.
+     * Coroutine::create() only returns once the coroutine finishes OR yields (e.g. on sleep()/IO
+     * -- that's what lets other coroutines run concurrently in the meantime); if the callable
+     * throws only after such a yield, nothing is left to observe it synchronously, and Swoole does
+     * not propagate an uncaught Throwable out of a coroutine to its caller -- it becomes a fatal
+     * error that kills the whole process instead. Catching it here and queuing it avoids the
+     * crash; the `counit` script checks this once every coroutine has drained and fails the whole
+     * run if it's non-empty, instead of letting a false "pass" stand uncorrected.
+     *
+     * @var array<string, \Throwable>
+     */
+    public static array $deferredFailures = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -25,18 +40,41 @@ class Counit
     public static function create(callable $callable, int $count = 0): int
     {
         if (Helper::isCoroutineFriendly()) {
+            $trace  = debug_backtrace();
+            $caller = $trace[1]['object'] ?? null;
+
             if ($count > 0) {
-                $trace = debug_backtrace();
-                if (!empty($trace[1]['object']) && ($trace[1]['object'] instanceof TestCase)) {
-                    $test = $trace[1]['object'];
-                    /* @var TestCase $test */
-                    $test->addToAssertionCount($count);
+                if ($caller instanceof TestCase) {
+                    $caller->addToAssertionCount($count);
                 } else {
                     throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
                 }
             }
 
-            $id = Coroutine::create($callable);
+            $description = $caller instanceof TestCase
+                ? sprintf('%s::%s', get_class($caller), $caller->nameWithDataSet())
+                : sprintf('%s() call', __METHOD__);
+
+            $caught          = null;
+            $alreadyReturned = false;
+
+            $id = Coroutine::create(function () use ($callable, &$caught, &$alreadyReturned, $description): void {
+                try {
+                    $callable();
+                } catch (\Throwable $e) {
+                    if ($alreadyReturned) {
+                        self::$deferredFailures[$description] = $e;
+                    } else {
+                        $caught = $e;
+                    }
+                }
+            });
+            $alreadyReturned = true;
+
+            if ($caught !== null) {
+                throw $caught;
+            }
+
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
         }
 
