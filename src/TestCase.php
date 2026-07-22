@@ -44,15 +44,31 @@ class TestCase extends BaseTestCase
      * customizing test method invocation. Note this wraps only the test method itself;
      * setUp()/tearDown() run outside the coroutine.
      *
+     * Swoole does not propagate an uncaught Throwable from a Coroutine::create() callback back to
+     * the caller; it becomes a fatal error that kills the whole process instead. Because of that,
+     * the test method is invoked inside a try/catch block that runs inside the coroutine, and any
+     * Throwable it catches is re-thrown afterward from this (non-coroutine) context, where
+     * PHPUnit's own exception handling (e.g. for expectException()) can see it.
+     *
      * @param array<mixed> $testArguments
      */
     protected function invokeTestMethod(string $methodName, array $testArguments): mixed
     {
         if (Helper::isCoroutineFriendly()) {
             $this->expectNotToPerformAssertions(); // To suppress warning message "This test did not perform any assertions".
-            Counit::create(function () use ($methodName, $testArguments): void {
-                parent::invokeTestMethod($methodName, $testArguments);
+
+            $caught = null;
+            Counit::create(function () use ($methodName, $testArguments, &$caught): void {
+                try {
+                    parent::invokeTestMethod($methodName, $testArguments);
+                } catch (\Throwable $e) {
+                    $caught = $e;
+                }
             });
+
+            if ($caught !== null) {
+                throw $caught;
+            }
 
             return null;
         }
