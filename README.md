@@ -320,7 +320,7 @@ faster, with limitations apply. Here is a list of limitations of this package:
   blocking mode only: _MongoDB_, _Couchbase_, and some ODBC drivers.
 * The package doesn't work exactly the same as when running under _PHPUnit_:
   * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. When that happens, _counit_ reports the failure at the end of the run and exits with a non-zero code, so the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
-  * The # of assertions reported could be different from _PHPUnit_.
+  * The total # of assertions reported at the end of a run matches _PHPUnit_, but per-test assertion counts (as shown in verbose/TestDox-style output) may be attributed to a different test than the one that performed them.
   * Some exceptions/errors are not handled/reported the same.
 
 # Local Development
@@ -343,8 +343,8 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 # TODOs
 
 * Better integration with _PHPUnit_.
-  * Deal with annotation _@doesNotPerformAssertions_ in the global style.
-  * Make # of assertions consistent with the one reported from _PHPUnit_.
+  * Deal with attribute _#[DoesNotPerformAssertions]_ in the global style.
+  * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
 * Better error/exception handling.
 
 # License

@@ -13,6 +13,19 @@ use Swoole\Coroutine;
 class Counit
 {
     /**
+     * Sum of all assertion counts credited to tests up front via addToAssertionCount() in create():
+     * the explicit $count values passed by "case-by-case" style tests, plus the single credit
+     * TestCase::invokeTestMethod() passes for every "global style" test. These credits stand in for
+     * assertions that will only run later inside a coroutine -- but those assertions ALSO increment
+     * PHPUnit's static assertion counter when they eventually run, so they either get harvested
+     * into whatever test happens to be current at that moment (double-counting them) or, after the
+     * last test, never get harvested at all. CounitExtension uses this ledger together with the
+     * counter residue left after draining all coroutines to correct the run's reported assertion
+     * total to exactly what a blocking (non-Swoole) run would have reported.
+     */
+    public static int $creditedAssertionCount = 0;
+
+    /**
      * Failures/errors thrown by a coroutine *after* create() already returned to its caller --
      * meaning the caller (and, for tests, PHPUnit itself) already moved on assuming success.
      * Coroutine::create() only returns once the coroutine finishes OR yields (e.g. on sleep()/IO
@@ -46,6 +59,7 @@ class Counit
             if ($count > 0) {
                 if ($caller instanceof TestCase) {
                     $caller->addToAssertionCount($count);
+                    self::$creditedAssertionCount += $count;
                 } else {
                     throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
                 }

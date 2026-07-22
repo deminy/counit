@@ -24,7 +24,11 @@ class TestCase extends BaseTestCase
         parent::setUpBeforeClass();
         if (Helper::isCoroutineFriendly()) {
             static::$coroutineOptions = Coroutine::getOptions() ?? [];
-            Coroutine::set([Constant::OPTION_HOOK_FLAGS => SWOOLE_HOOK_ALL]);
+            // Swoole only honors hook flags configured before the coroutine scheduler starts (the
+            // `counit` script sets the authoritative value; see Helper::coroutineHookFlags()), so
+            // this call is a no-op on current Swoole versions -- it is kept so the intended flags
+            // are stated wherever coroutine options are touched, should that behavior change.
+            Coroutine::set([Constant::OPTION_HOOK_FLAGS => Helper::coroutineHookFlags()]);
         }
     }
 
@@ -51,10 +55,15 @@ class TestCase extends BaseTestCase
     protected function invokeTestMethod(string $methodName, array $testArguments): mixed
     {
         if (Helper::isCoroutineFriendly()) {
-            $this->expectNotToPerformAssertions(); // To suppress warning message "This test did not perform any assertions".
+            // The second argument credits this test with one assertion up front. That suppresses
+            // the "This test did not perform any assertions" warning (the test's real assertions
+            // usually run after PHPUnit has already read its count; see Counit::create()) without
+            // using expectNotToPerformAssertions(), which would instead flag the test as risky
+            // whenever one of its assertions happens to run early. The credit is subtracted again
+            // from the run's total by CounitExtension's end-of-run correction.
             Counit::create(function () use ($methodName, $testArguments): void {
                 parent::invokeTestMethod($methodName, $testArguments);
-            });
+            }, 1);
 
             return null;
         }
