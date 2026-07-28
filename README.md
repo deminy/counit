@@ -330,6 +330,12 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. When that happens, _counit_ reports the failure at the end of the run and exits with a non-zero code, so the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
   * The total # of assertions reported at the end of a run matches _PHPUnit_, but per-test assertion counts (as shown in verbose/TestDox-style output) may be attributed to a different test than the one that performed them.
   * Some exceptions/errors are not handled/reported the same.
+* Tests using PHPUnit's process isolation (attributes _#[RunInSeparateProcess]_ and _#[RunTestsInSeparateProcesses]_,
+  or option `--process-isolation`) behave and are counted exactly as under _PHPUnit_, but they gain nothing from this
+  package: _PHPUnit_ runs each of them in a separate child process, which is plain non-coroutine PHP, so the test body
+  there runs in blocking mode. Worse, such a test blocks the entire run for as long as its child process takes, since
+  no other coroutine can make progress meanwhile. Mixing a few isolated tests into a suite is fine; running a whole
+  suite under `--process-isolation` defeats the purpose of _counit_.
 
 # Local Development
 

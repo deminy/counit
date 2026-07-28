@@ -33,4 +33,11 @@ jobs:
         run: composer install -nq --no-progress
 
       - name: Test Compatibility with PHPUnit
-        run: ./counit --testsuite compatibility
+        # The reported assertion total is checked too, not just the exit code: counit corrects that
+        # total at the end of a run (see Deminy\Counit\CounitExtension), and a regression there --
+        # e.g. delayed assertions being wiped instead of counted -- lowers the total silently while
+        # the run still exits 0. The expected result is identical with and without Swoole.
+        run: |
+          set -o pipefail
+          ./counit --testsuite compatibility | tee /tmp/compatibility.log
+          grep -qF 'OK (17 tests, 22 assertions)' /tmp/compatibility.log
