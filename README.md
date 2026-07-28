@@ -91,6 +91,17 @@ Or, in your _composer.json_ file, make sure to have package _deminy/counit_ incl
 }
 ```
 
+Please pick the _counit_ version matching the version of _PHPUnit_ used in your project:
+
+| counit | PHPUnit | PHP |
+|--------|--------------------|-----------|
+| ~1.0.0 | ~13.0              | >= 8.4.1  |
+| ~1.0.0 | ~12.5.24           | >= 8.3    |
+| ~0.2.0 | ~8.0, ~9.0         | >= 7.2    |
+
+This branch is the ~0.2.0 series, the maintenance line for _PHPUnit_ ~8.0 and ~9.0. It receives bug fixes and security
+updates only; new work happens in the ~1.0.0 series.
+
 # Use "counit" in Your Project
 
 * Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests in one of the following two styles (details will be discussed in the next sections):
