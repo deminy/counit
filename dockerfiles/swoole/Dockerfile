@@ -1,4 +1,7 @@
-FROM phpswoole/swoole:4.8-php7.4-alpine
+ARG SWOOLE_VERSION=4.8
+ARG PHP_VERSION=7.4
+
+FROM phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION}-alpine
 
 RUN set -ex \
     apk update && \
