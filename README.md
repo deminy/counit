@@ -163,22 +163,10 @@ class SleepTest extends TestCase
 When customized method _setUpBeforeClass()_ and _tearDownAfterClass()_ are defined in the test cases, please make sure
 to call their parent methods accordingly in these customized methods.
 
-This style assumes there is no immediate assertions in test cases, nor assertions before a sleep() function call or a
-coroutine-friendly IO operation. Test cases like following still work, but they will trigger some warning messages when
-tested:
-
-```php
-class GlobalTest extends Deminy\Counit\TestCase
-{
-  public function testAssertionSuppression(): void
-  {
-    self::assertTrue(true, 'Trigger an immediate assertion.');
-    // ......
-  }
-}
-```
-
-We can rewrite this test class using the "case by case" style (discussed in the next section) to eliminate the warning messages.
+The total # of assertions reported at the end of a run matches _PHPUnit_ exactly. What can still differ is which test
+an individual assertion is attributed to: an assertion performed after a sleep()/IO yield may be counted against
+whichever test happened to be running at that moment, so the per-test counts shown in verbose/TestDox-style output are
+not always exact. See [Additional Notes](#additional-notes).
 
 To find more tests written in this style, please check tests under folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) (test suite "global").
 
