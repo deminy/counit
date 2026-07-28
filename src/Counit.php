@@ -13,6 +13,32 @@ use Swoole\Coroutine;
 class Counit
 {
     /**
+     * Sum of all assertion counts credited to tests up front via creditAssertionCount(): the
+     * explicit $count values passed by "case-by-case" style tests, plus the single credit
+     * TestCase::runBare() records for every "global style" test. These credits stand in for
+     * assertions that will only run later inside a coroutine -- but those assertions ALSO increment
+     * PHPUnit's static assertion counter when they eventually run, so they either get harvested
+     * into whatever test happens to be current at that moment (double-counting them) or, after the
+     * last test, never get harvested at all. CounitExtension uses this ledger together with the
+     * counter residue left after draining all coroutines to correct the run's reported assertion
+     * total to exactly what a blocking (non-Swoole) run would have reported.
+     *
+     * @var int
+     */
+    public static $creditedAssertionCount = 0;
+
+    /**
+     * The TestResult of the current run, remembered from the first test that creates a coroutine.
+     * PHPUnit 8/9 keeps the run's assertion total in its result printer rather than in TestResult
+     * itself, and the printer is reachable only as one of the TestResult's listeners; this is how
+     * CounitExtension gets to it (it receives no arguments of its own). Null when no test created
+     * a coroutine, in which case there is nothing to correct.
+     *
+     * @var \PHPUnit\Framework\TestResult|null
+     */
+    public static $testResult;
+
+    /**
      * Failures/errors thrown by a coroutine *after* create() already returned to its caller --
      * meaning the caller (and, for tests, PHPUnit itself) already moved on assuming success.
      * Coroutine::create() only returns once the coroutine finishes OR yields (e.g. on sleep()/IO
@@ -43,9 +69,13 @@ class Counit
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
 
+            if ($caller instanceof TestCase) {
+                self::$testResult = $caller->getTestResultObject();
+            }
+
             if ($count > 0) {
                 if ($caller instanceof TestCase) {
-                    $caller->addToAssertionCount($count);
+                    self::creditAssertionCount($caller, $count);
                 } else {
                     throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
                 }
@@ -83,6 +113,19 @@ class Counit
 
         $callable();
         return 0;
+    }
+
+    /**
+     * Credit a test with assertions it has not performed yet, and record the credit in the ledger
+     * CounitExtension subtracts again at the end of the run (see $creditedAssertionCount).
+     *
+     * The credit suppresses the "This test did not perform any assertions" warning for a test whose
+     * assertions all run later, inside its coroutine, after PHPUnit has already read its count.
+     */
+    public static function creditAssertionCount(TestCase $test, int $count): void
+    {
+        $test->addToAssertionCount($count);
+        self::$creditedAssertionCount += $count;
     }
 
     /**

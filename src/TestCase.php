@@ -42,14 +42,30 @@ class TestCase extends BaseTestCase
 
     /**
      * {@inheritDoc}
+     *
+     * See Counit::create() for how a Throwable thrown by the wrapped test -- whether synchronously
+     * or after a sleep()/IO yield -- is handled without crashing the process or letting a real
+     * failure silently pass as "OK".
      */
     public function runBare(): void
     {
         if (Helper::isCoroutineFriendly()) {
-            $this->expectNotToPerformAssertions(); // To suppress warning message "This test did not perform any assertions".
             Counit::create(function () {
                 parent::runBare();
             });
+
+            // Credit this test with one assertion, which suppresses the "This test did not perform
+            // any assertions" warning (its real assertions usually run only after PHPUnit has read
+            // the count) and is subtracted again from the run's total by CounitExtension. This
+            // replaces expectNotToPerformAssertions(), which instead flagged a test as risky
+            // whenever one of its assertions happened to run early.
+            //
+            // The credit has to be applied *after* create() returns rather than before it, because
+            // PHPUnit's own runBare() -- running inside the coroutine -- starts by zeroing the
+            // test's assertion count, and would wipe a credit added ahead of it. By the time
+            // create() returns, the coroutine has already run up to its first yield (or to
+            // completion), so that reset is behind us.
+            Counit::creditAssertionCount($this, 1);
         } else {
             parent::runBare();
         }
