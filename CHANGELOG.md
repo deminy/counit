@@ -71,6 +71,26 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
 
+## 0.2.3 - 2026-07-27
+
+Maintenance release for the PHPUnit 8/9 series.
+
+### Bug fixes
+
+- **Fix the hang when a test runs in a separate process.** `SWOOLE_HOOK_ALL` includes `SWOOLE_HOOK_PROC`, so the `proc_open()` call and the pipe reads PHPUnit uses to run a test annotated with `@runInSeparateProcess` were routed through Swoole. Under counit with Swoole enabled that never completed: a single isolated test hung the whole run indefinitely, with no summary and no way to tell what it was waiting for. That hook is now excluded as well, for the same reason STDIO and file operations already were — PHPUnit uses all three outside any test's assertion-counting window. An isolated test now blocks the run for the duration of its child process instead of yielding; it gains nothing from counit either way, since the child process is plain non-coroutine PHP. (2fa66b3)
+
+### Improvements
+
+- **Exact assertion totals under Swoole.** The run summary now reports exactly what a blocking PHPUnit run would (e.g. `OK (16 tests, 24 assertions)`), with no risky-test noise; the global style previously reported 0 assertions and flagged every asserting test as risky. An end-of-run correction reconciles the total (reported − up-front credits + post-drain residue), and the global style now credits each test one assertion up front instead of calling `expectNotToPerformAssertions()`, which used to flag a test as risky whenever one of its assertions happened to run early. Per-test attribution in verbose output may still differ; see README. (798aa61, 70e7ce4)
+
+### Housekeeping
+
+- Docker images for the sample tests are now built locally via `docker-compose` (parameterized by `PHP_VERSION`/`SWOOLE_VERSION` build args); the image publishing workflow was removed, having only ever run on `master`. (84312b1)
+- Document the counit/PHPUnit compatibility matrix under the README's Installation section, and state plainly that this series is the maintenance line for PHPUnit ~8.0/~9.0. (69183a7)
+- Upgrade the CI runners to `ubuntu-24.04` and bump the actions in step, including the `isbang/compose-action` and `nick-invision/retry` repository renames. (b357ce6)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.2.2...0.2.3
+
 ## 0.2.2 - 2026-07-22
 
 Maintenance release for the PHPUnit 8/9 series.
