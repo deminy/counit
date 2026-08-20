@@ -23,9 +23,11 @@ use Swoole\Coroutine;
  */
 final class CounitExtension implements Extension
 {
+    #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
         $facade->registerSubscriber(new class implements ExecutionFinishedSubscriber {
+            #[\Override]
             public function notify(ExecutionFinished $event): void
             {
                 if (Helper::isCoroutineFriendly()) {

@@ -22,7 +22,7 @@ class CurlTest extends TestCase
     public function testCurl(int $seconds, string $message): void
     {
         Counit::create(
-            function () use ($seconds, $message) {
+            function () use ($seconds, $message): void {
                 $ch = curl_init("http://web:9501?seconds={$seconds}");
                 if ($ch === false) {
                     self::fail('The curl resource is invalid.');

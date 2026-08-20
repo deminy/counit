@@ -19,7 +19,7 @@ class SleepTest extends TestCase
     public function testSleep(int $seconds, string $message): void
     {
         Counit::create(
-            function () use ($seconds, $message) {
+            function () use ($seconds, $message): void {
                 $startTime = time();
                 Counit::sleep($seconds);
                 $endTime = time();

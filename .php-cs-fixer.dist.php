@@ -6,6 +6,8 @@ return (new PhpCsFixer\Config())
     ->setRiskyAllowed(true)
     ->setRules([
         '@DoctrineAnnotation'                              => true,
+        '@PHP83Migration'                                  => true,
+        '@PHP80Migration:risky'                            => true,
         '@PhpCsFixer'                                      => true,
         '@PSR2'                                            => true,
         '@Symfony'                                         => true,

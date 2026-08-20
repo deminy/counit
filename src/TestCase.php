@@ -17,8 +17,9 @@ class TestCase extends BaseTestCase
     /**
      * @var array<string, mixed>
      */
-    protected static $coroutineOptions = [];
+    protected static array $coroutineOptions = [];
 
+    #[\Override]
     public static function setUpBeforeClass(): void
     {
         parent::setUpBeforeClass();
@@ -32,9 +33,10 @@ class TestCase extends BaseTestCase
         }
     }
 
+    #[\Override]
     public static function tearDownAfterClass(): void
     {
-        if (Helper::isCoroutineFriendly() && !empty(static::$coroutineOptions)) {
+        if (Helper::isCoroutineFriendly() && static::$coroutineOptions !== []) {
             Coroutine::set(static::$coroutineOptions);
         }
         parent::tearDownAfterClass();
@@ -52,6 +54,7 @@ class TestCase extends BaseTestCase
      *
      * @param array<mixed> $testArguments
      */
+    #[\Override]
     protected function invokeTestMethod(string $methodName, array $testArguments): mixed
     {
         if (Helper::isCoroutineFriendly()) {

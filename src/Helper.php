@@ -8,15 +8,9 @@ use Swoole\Coroutine;
 
 class Helper
 {
-    /**
-     * @var string
-     */
-    protected static $prefix = '';
+    protected static string $prefix = '';
 
-    /**
-     * @var int
-     */
-    protected static $counter = 0;
+    protected static int $counter = 0;
 
     /**
      * Check to see if running unit tests using counit, with the Swoole extension enabled.
@@ -53,7 +47,7 @@ class Helper
 
     public static function getNewKey(): string
     {
-        if (empty(self::$prefix)) {
+        if (self::$prefix === '') {
             self::initPrefix();
         }
         return self::$prefix . (++self::$counter);
@@ -78,7 +72,7 @@ class Helper
 
     protected static function initPrefix(string $prefix = ''): void
     {
-        if (empty($prefix)) {
+        if ($prefix === '') {
             $prefix = uniqid('test-key-') . '-' . getmypid() . '-';
         }
         self::$prefix = $prefix;

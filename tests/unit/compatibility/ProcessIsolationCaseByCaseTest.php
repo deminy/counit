@@ -30,7 +30,7 @@ class ProcessIsolationCaseByCaseTest extends TestCase
     public function testIsolatedTestRunsInBlockingMode(): void
     {
         Counit::create(
-            function () {
+            function (): void {
                 self::assertFalse(Helper::isCoroutineFriendly(), 'A test running in a separate process is not executed inside a coroutine.');
             }
         );
@@ -44,7 +44,7 @@ class ProcessIsolationCaseByCaseTest extends TestCase
     public function testIsolatedImmediateAndDelayedAssertions(): void
     {
         Counit::create(
-            function () {
+            function (): void {
                 self::assertTrue(true, 'An immediate assertion is triggered when start running the test case.');
                 Counit::sleep(1);
                 self::assertTrue(true, 'A delayed assertion is triggered.');

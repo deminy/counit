@@ -58,7 +58,7 @@ if (!ini_get('date.timezone')) {
     ini_set('date.timezone', 'UTC');
 }
 
-foreach (array(__DIR__ . '/../../autoload.php', __DIR__ . '/../vendor/autoload.php', __DIR__ . '/vendor/autoload.php') as $file) {
+foreach ([__DIR__ . '/../../autoload.php', __DIR__ . '/../vendor/autoload.php', __DIR__ . '/vendor/autoload.php'] as $file) {
     if (file_exists($file)) {
         define('PHPUNIT_COMPOSER_INSTALL', $file);
 
@@ -79,7 +79,7 @@ if (!defined('PHPUNIT_COMPOSER_INSTALL')) {
     die(1);
 }
 
-$options = getopt('', array('prepend:'));
+$options = getopt('', ['prepend:']);
 
 if (isset($options['prepend'])) {
     require $options['prepend'];
@@ -97,14 +97,12 @@ if (extension_loaded('swoole')) {
             // they must be set here rather than from inside a test. See
             // Deminy\Counit\Helper::coroutineHookFlags() for why STDIO/file hooks are excluded.
             'hook_flags'     => Deminy\Counit\Helper::coroutineHookFlags(),
-            'exit_condition' => function (): bool {
-                return Swoole\Coroutine::stats()['coroutine_num'] === 0;
-            },
+            'exit_condition' => static fn (): bool => Swoole\Coroutine::stats()['coroutine_num'] === 0,
         ]
     );
 
     $code = 0;
-    Swoole\Coroutine\run(function () use (&$code): void {
+    Swoole\Coroutine\run(static function () use (&$code): void {
         // PHPUnit 10 removed PHPUnit\TextUI\Command; PHPUnit\TextUI\Application::run() is the
         // replacement. It returns the exit code instead of calling exit() itself, so it is safe
         // to invoke inside a coroutine.
@@ -121,7 +119,7 @@ if (extension_loaded('swoole')) {
     // for that here, once we're back in normal (non-coroutine) PHP -- calling exit() from inside a
     // coroutine gets intercepted by Swoole itself and can't reliably override PHPUnit's own exit
     // code -- and force the run to fail instead of letting that false "pass" stand uncorrected.
-    if (!empty(Deminy\Counit\Counit::$deferredFailures)) {
+    if (Deminy\Counit\Counit::$deferredFailures !== []) {
         fwrite(STDERR, PHP_EOL . 'The following failures happened after their test had already been reported as passed' . PHP_EOL . '(the assertion/exception occurred after a sleep()/IO yield point):' . PHP_EOL . PHP_EOL);
         foreach (Deminy\Counit\Counit::$deferredFailures as $testDescription => $throwable) {
             fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));

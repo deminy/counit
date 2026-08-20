@@ -19,7 +19,7 @@ class MySQLTest extends TestCase
     public function testRedis(int $seconds, string $message): void
     {
         Counit::create(
-            function () use ($seconds, $message) {
+            function () use ($seconds, $message): void {
                 $mysqli = new \mysqli('mysql', 'username', 'password', 'test');
                 $stmt   = $mysqli->prepare("SELECT SLEEP({$seconds})");
                 if ($stmt === false) {

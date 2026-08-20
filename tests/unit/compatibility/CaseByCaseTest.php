@@ -22,7 +22,7 @@ class CaseByCaseTest extends TestCase
     public function testAssertionSuppression1(): void
     {
         Counit::create(
-            function () {
+            function (): void {
                 self::assertTrue(true, 'Trigger an immediate assertion and see if warning message "This test did not perform any assertions" is suppressed properly.');
             }
         );
@@ -36,7 +36,7 @@ class CaseByCaseTest extends TestCase
     public function testAssertionSuppression2(): void
     {
         Counit::create(
-            function () {
+            function (): void {
                 sleep(1);
                 self::assertTrue(true, 'A delayed assertion is triggered.');
             },
@@ -51,7 +51,7 @@ class CaseByCaseTest extends TestCase
     public function testAssertionSuppression3(): void
     {
         Counit::create(
-            function () {
+            function (): void {
                 self::assertTrue(true, 'An immediate assertion is triggered when start running the test case.');
                 sleep(1);
                 self::assertTrue(true, 'A delayed assertion is triggered.');

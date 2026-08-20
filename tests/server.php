@@ -13,7 +13,7 @@ declare(strict_types=1);
 $http = new Swoole\Http\Server('0.0.0.0', 9501);
 $http->on(
     'request',
-    function (Swoole\Http\Request $request, Swoole\Http\Response $response) {
+    function (Swoole\Http\Request $request, Swoole\Http\Response $response): void {
         $seconds = (int) ($request->get['seconds'] ?? 0);
         if ($seconds > 0) {
             Swoole\Coroutine::sleep($seconds);

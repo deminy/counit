@@ -66,7 +66,7 @@ class Counit
             }
 
             $description = $caller instanceof TestCase
-                ? sprintf('%s::%s', get_class($caller), $caller->nameWithDataSet())
+                ? sprintf('%s::%s', $caller::class, $caller->nameWithDataSet())
                 : sprintf('%s() call', __METHOD__);
 
             $caught          = null;
