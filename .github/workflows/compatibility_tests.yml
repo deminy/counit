@@ -41,3 +41,24 @@ jobs:
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
           grep -qF 'OK (39 tests, 46 assertions)' /tmp/compatibility.log
+
+      - name: Test Late Skip/Incomplete Handling
+        # A skip/incomplete signalled after the test's first yield cannot change the test's status
+        # anymore (PHPUnit already reported the test as passed); counit must list such tests in an
+        # end-of-run notice WITHOUT failing the run, while a skip requested before the first yield
+        # keeps full PHPUnit semantics. The two modes deliberately diverge here, so each is
+        # asserted against its own expected output; the exit code must be 0 in both. This cannot
+        # live in the exact-summary-gated suite above, since a skipped test changes that summary
+        # line by design.
+        run: |
+          set -o pipefail
+          ./counit -c phpunit.xml.dist tests/regression/LateSkipTest.php > /tmp/late-skip.log 2> /tmp/late-skip.err
+          cat /tmp/late-skip.log /tmp/late-skip.err
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/late-skip.log
+            grep -qF 'status remains "passed"' /tmp/late-skip.err
+            grep -qF 'LateSkipTest::testSkippedAfterYield' /tmp/late-skip.err
+            grep -qF 'LateSkipTest::testIncompleteAfterYield' /tmp/late-skip.err
+          else
+            grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
+          fi
