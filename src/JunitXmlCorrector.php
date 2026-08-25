@@ -43,8 +43,12 @@ class JunitXmlCorrector
     /**
      * Per test-class name and test name: the IDs of its finished tests, in emission order. The
      * name (from TestMethod::name()) already carries the data-set, repetition and attempt
-     * suffixes, so each queue normally holds one entry; a genuine duplicate (the same class
-     * included in two testsuites) stays FIFO-disambiguated in document order.
+     * suffixes, and PHPUnit refuses to add the same test file to a second testsuite (a runner
+     * warning: "Cannot add file ... as it was already added to test suite ..."), so each queue
+     * holds one entry in practice -- the same test never runs twice under one ID, which is also
+     * what keeps the per-ID ledgers in Counit collision-free. The list is pure defense: should an
+     * unforeseen path ever produce two elements sharing a class and name, they would pair with
+     * their records in document order instead of corrupting each other.
      *
      * @var array<string, array<string, list<string>>>
      */
