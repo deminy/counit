@@ -33,6 +33,25 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ### Bug fixes
 
+- **Correct the assertion counts in the JUnit XML report.** The report's per-testcase `assertions` attributes are
+  captured from the `Test\Finished` events, so under Swoole they carried the up-front assertion credit — one extra
+  assertion on every automatic-approach test, even in fully synchronous suites — missed assertions counted directly
+  on the test object after a yield, and attributed assertions performed after a yield to whatever test's counting
+  window happened to be open; the suite-level aggregates were skewed accordingly, while the CLI summary was already
+  corrected. counit now attributes every increment of PHPUnit's shared assertion counter to the test that performed
+  it (segment accounting: Swoole's scheduling is cooperative, so between two of counit's observation points — test
+  coroutine start/end, `Counit::sleep()`, and per-namespace `sleep()`/`usleep()` shims that make the automatic
+  approach's raw sleep calls observable — every increment belongs to the running test) and rewrites the report
+  before the JUnit logger flushes it (the logger buffers one document and only writes at `ExecutionFinished`, after
+  counit's own subscriber has run), recomputing every testsuite aggregate from its corrected testcases. The
+  per-testcase numbers now match a blocking run exactly whenever every yield is observable; a yield counit cannot
+  observe (hooked network IO, a fully-qualified `\sleep()` call, a test class in the global namespace) leaves that
+  test's count too low — never another test's too high. A testcase element whose test never emitted
+  `Test\Finished` (e.g. skipped from `setUp()`) is left exactly as PHPUnit wrote it, matched by class and name
+  rather than position. With Swoole's preemptive scheduler enabled, segment accounting is switched off and the
+  correction falls back to `emitted − credit + late instance counts`. On any unexpected PHPUnit-internals change
+  the report is left as PHPUnit produced it.
+
 - **Stop failing the run for a skip/incomplete signalled after the test's first yield.** A `markTestSkipped()` or
   `markTestIncomplete()` call made after the test's coroutine had already yielded was queued as a deferred *failure*:
   the run printed it in the failure block and exited 1, even though plain PHPUnit exits 0 for skipped/incomplete

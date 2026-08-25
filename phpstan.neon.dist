@@ -11,8 +11,11 @@ parameters:
     - ./src
     - ./tests
   ignoreErrors:
-    # The compatibility tests assert literal true on purpose: they exercise how counit
-    # counts/suppresses assertions under PHPUnit, not the assertions' own logic.
+    # The compatibility and regression tests assert literal true on purpose: they exercise how
+    # counit counts/suppresses assertions under PHPUnit, not the assertions' own logic.
     -
       identifier: staticMethod.alreadyNarrowedType
       path: tests/unit/compatibility/*
+    -
+      identifier: staticMethod.alreadyNarrowedType
+      path: tests/regression/*

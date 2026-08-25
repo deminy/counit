@@ -6,6 +6,8 @@ namespace Deminy\Counit;
 
 use PHPUnit\Event\Test\Finished as TestFinished;
 use PHPUnit\Event\Test\FinishedSubscriber as TestFinishedSubscriber;
+use PHPUnit\Event\Test\PreparationStarted as TestPreparationStarted;
+use PHPUnit\Event\Test\PreparationStartedSubscriber as TestPreparationStartedSubscriber;
 use PHPUnit\Event\TestRunner\ExecutionFinished;
 use PHPUnit\Event\TestRunner\ExecutionFinishedSubscriber;
 use PHPUnit\Framework\Assert;
@@ -29,6 +31,30 @@ final class CounitExtension implements Extension
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
         if (Helper::isCoroutineFriendly()) {
+            // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine
+            // only ever switches at a yield. Swoole's preemptive scheduler breaks that premise,
+            // so attribution stays off under it and the JUnit per-testcase correction falls back
+            // to the credit/late arithmetic in Counit::correctedAssertionCountFor().
+            Attribution::$enabled = !filter_var((string) ini_get('swoole.enable_preemptive_scheduler'), FILTER_VALIDATE_BOOL);
+
+            // Fires before setUp()/#[Before] hooks run, so their assertions are attributed to the
+            // test too. Also the earliest point the test's class name is known, which is when the
+            // sleep()/usleep() shims for its namespace must be in place -- before any test code
+            // of that namespace runs.
+            $facade->registerSubscriber(new class implements TestPreparationStartedSubscriber {
+                #[\Override]
+                public function notify(TestPreparationStarted $event): void
+                {
+                    $test = $event->test();
+
+                    if ($test->isTestMethod()) {
+                        Attribution::installShims($test->className());
+                    }
+
+                    Attribution::testStarting($test->id());
+                }
+            });
+
             // Remember the assertion count PHPUnit reports for each test -- the number that enters
             // the run's total. Compared with the count read inside the test's coroutine once it has
             // fully finished, this exposes assertions counted directly on the test object *after*
@@ -39,7 +65,14 @@ final class CounitExtension implements Extension
                 #[\Override]
                 public function notify(TestFinished $event): void
                 {
-                    Counit::recordEmittedAssertionCount($event->test()->id(), $event->numberOfAssertionsPerformed());
+                    $test = $event->test();
+
+                    Counit::recordEmittedAssertionCount($test->id(), $event->numberOfAssertionsPerformed());
+                    Attribution::testFinished($test->id());
+
+                    if ($test->isTestMethod()) {
+                        JunitXmlCorrector::recordTest($test->className(), $test->name(), $test->id());
+                    }
                 }
             });
         }
@@ -58,6 +91,7 @@ final class CounitExtension implements Extension
                     // leaves the main coroutine there. Reset the counter so that, after the drain
                     // below, it holds exactly the assertions that ran too late for PHPUnit to see.
                     Assert::resetCount();
+                    Attribution::counterReset();
 
                     // When the only coroutine left is the one created in script /counit, it means all the tests are
                     // finally done, and it's time to hand it over to PHPUnit to take care of the rest part.
@@ -82,6 +116,14 @@ final class CounitExtension implements Extension
                     // run exactly. The collector has no public mutator (it is fed by events that
                     // have already been dispatched), hence the reflection; if PHPUnit's internals
                     // change, the correction is skipped rather than breaking the run.
+                    // The JUnit XML report needs its own correction: its per-testcase `assertions`
+                    // attributes were captured from the Test\Finished events, so they carry the
+                    // up-front credits (inflating every automatic-approach test's count, even in
+                    // fully synchronous suites) and miss the late instance counts. The logger only
+                    // writes the report when its own ExecutionFinished subscriber runs -- after
+                    // this one, since extensions bootstrap before log writers register.
+                    JunitXmlCorrector::correct();
+
                     $delta = Assert::getCount() - Counit::$creditedAssertionCount + Counit::lateAssertionCount();
                     if ($delta !== 0) {
                         try {

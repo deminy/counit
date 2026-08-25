@@ -165,10 +165,11 @@ class SleepTest extends TestCase
 When customized method _setUpBeforeClass()_ and _tearDownAfterClass()_ are defined in the test cases, please make sure
 to call their parent methods accordingly in these customized methods.
 
-The total # of assertions reported at the end of a run matches _PHPUnit_ exactly. What can still differ is which test
-an individual assertion is attributed to: an assertion performed after a sleep()/IO yield may be counted against
-whichever test happened to be running at that moment, so the per-test counts shown in verbose/TestDox-style output are
-not always exact. See [Additional Notes](#additional-notes).
+The total # of assertions reported at the end of a run matches _PHPUnit_ exactly, and the per-testcase counts in the
+JUnit XML report (`--log-junit`) are corrected as well — exact whenever counit can observe the test's yields
+(sleep()/usleep() calls in a namespaced test class, and Counit::sleep()). An assertion performed after a yield counit
+cannot observe (e.g. hooked network IO) goes missing from its own test's JUnit count — but is never added to another
+test's. See [Additional Notes](#additional-notes).
 
 To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/master/tests/unit/automatic) (test suite "automatic").
 
@@ -356,7 +357,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
 | `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` | ❌ snapshot/restore fires while other tests are mid-flight | ❌ (annotations) |
 | `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished | ✅ runs after the finished body |
-| Per-test reporting: per-test assertion counts, durations, TestDox numbers, `--log-junit`/TeamCity logs | ⚠️ approximate; a failure after a yield is logged as PASSED in XML — trust the exit code, not the logs | ⚠️ same |
+| Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ approximate, no XML correction |
 | A `tearDown()` that throws | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error | ⚠️ same |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
 | Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
@@ -380,7 +381,7 @@ faster, with limitations apply. Here is a list of limitations of this package:
   blocking mode only: _MongoDB_, _Couchbase_, and some ODBC drivers.
 * The package doesn't work exactly the same as when running under _PHPUnit_:
   * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. When that happens, _counit_ reports the failure at the end of the run and exits with a non-zero code, so the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
-  * The total # of assertions reported at the end of a run matches _PHPUnit_, but per-test assertion counts (as shown in verbose/TestDox-style output) may be attributed to a different test than the one that performed them.
+  * The total # of assertions reported at the end of a run matches _PHPUnit_, and the per-testcase `assertions` attributes in the JUnit XML report (`--log-junit`) are corrected before the report is written. The correction attributes every assertion to the test that performed it (segment accounting over the coroutine switches counit can observe, including sleep()/usleep() calls in namespaced test classes and assertions counted directly on the test object after a yield, e.g. from a relocated _tearDown()_), so the counts match a blocking run exactly whenever every yield is observable. A yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()` call, a test class in the global namespace) leaves that test's own count too low — never another test's too high. With Swoole's preemptive scheduler enabled, segment accounting is switched off and the correction falls back to removing the up-front credit and adding post-report instance counts only.
   * Some exceptions/errors are not handled/reported the same.
 * Tests using PHPUnit's process isolation (attributes _#[RunInSeparateProcess]_ and _#[RunTestsInSeparateProcesses]_,
   or option `--process-isolation`) behave and are counted exactly as under _PHPUnit_, but they gain nothing from this
@@ -458,10 +459,19 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 # TODOs
 
 * Better integration with _PHPUnit_.
-  * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
   * Support attribute _#[Depends]_ in the automatic approach: pass producer tests' real return values through to dependent
     tests (currently _NULL_ — see [Additional Notes](#additional-notes)), and only run dependents once their
     dependencies have actually finished (not just yielded). Until then, the limitation is documented above.
+  * Make the per-testcase # of assertions in `--log-junit` output exact for *all* tests. Segment accounting already
+    makes every test with observable yields exact; a yield counit cannot observe (hooked network IO, a
+    fully-qualified `\sleep()` call, a test class in the global namespace) still leaves that test's count too low.
+    Full exactness needs every coroutine resume to be observable — runtime or upstream support, e.g. a Swoole
+    coroutine-switch callback or a _PHPUnit_ assertion-counter sink. `--log-otr` output has no correction yet.
+* Pursue an upstream _PHPUnit_ extension point for the after-test phase — the counterpart of _invokeTestMethod()_ from
+  [phpunit#6450](https://github.com/sebastianbergmann/phpunit/issues/6450): it would replace the internals-based
+  takeover of _tearDown()_/_#[After]_ hooks with supported API, and a similar seam around mock verification is the
+  only way to make _->expects()_ on a mock called after a yield behave correctly (see
+  [Compatibility with PHPUnit](#compatibility-with-phpunit)).
 * Better error/exception handling.
 
 # License

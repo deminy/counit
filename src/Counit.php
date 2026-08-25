@@ -87,6 +87,16 @@ class Counit
     private static array $finalAssertionCounts = [];
 
     /**
+     * Per test (keyed the same way): the assertion credit actually applied to it by
+     * creditCaller(). Used by JunitXmlCorrector to subtract the credit from the per-testcase
+     * `assertions` attributes in the JUnit XML report, which -- unlike the run summary -- has no
+     * end-of-run total correction of its own.
+     *
+     * @var array<string, int>
+     */
+    private static array $appliedCredits = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -115,8 +125,11 @@ class Counit
 
             $caught          = null;
             $alreadyReturned = false;
+            $testId          = $caller instanceof TestCase ? $caller->valueObjectForEvents()->id() : null;
 
-            $id = Coroutine::create(function () use ($callable, $caller, &$caught, &$alreadyReturned, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, $testId, &$caught, &$alreadyReturned, $description): void {
+                Attribution::coroutineStarted($testId);
+
                 try {
                     $callable();
                 } catch (\Throwable $e) {
@@ -152,9 +165,15 @@ class Counit
                     if ($caller instanceof TestCase) {
                         self::recordFinalAssertionCount($caller);
                     }
+
+                    Attribution::coroutineFinished();
                 }
             });
             $alreadyReturned = true;
+
+            // The calling coroutine is running again (the child finished or yielded): re-claim
+            // the assertion counter for whichever test it is running.
+            Attribution::resumed();
 
             if ($caught !== null) {
                 throw $caught;
@@ -233,6 +252,50 @@ class Counit
     }
 
     /**
+     * The assertion count a test's JUnit XML `assertions` attribute should carry, or null when
+     * the attribute must be left exactly as PHPUnit wrote it.
+     *
+     * With segment accounting available (see Attribution), the number is what the test itself
+     * performed: the static-counter segments attributed to it at counit's observation points,
+     * plus the assertions counted directly on the test object (the emitted count minus the
+     * up-front credit and the harvested counter window, plus the post-report instance counts) --
+     * the credit never enters either term. Exact whenever every yield of the test is observable
+     * (sleep()/usleep() in a namespaced test class, Counit::sleep()); an unobserved yield (hooked
+     * network IO, a fully-qualified \sleep() call, a test class in the global namespace) leaves
+     * an undercount, never an overcount. When segment accounting is unavailable (Swoole's
+     * preemptive scheduler), this falls back to `emitted - credit + late`, which is exact for
+     * tests that never yield.
+     *
+     * Null is returned when no Test\Finished event was observed for the test (it was skipped or
+     * failed before it was prepared -- PHPUnit only emits the event for prepared tests), or --
+     * under segment accounting -- when counit never ran a coroutine for it (a process-isolated
+     * test, or a test that never went through create()): in both cases nothing of the test's own
+     * ran after PHPUnit counted it, so PHPUnit's number is already the right one.
+     */
+    public static function correctedAssertionCountFor(string $testId): ?int
+    {
+        $emitted = self::$emittedAssertionCounts[$testId] ?? null;
+        if ($emitted === null) {
+            return null;
+        }
+
+        $credit = self::$appliedCredits[$testId] ?? 0;
+        $late   = max(0, (self::$finalAssertionCounts[$testId] ?? 0) - $emitted);
+
+        if (Attribution::$enabled) {
+            if (!Attribution::observedCoroutineFor($testId)) {
+                return null;
+            }
+
+            $instanceOnly = max(0, $emitted - $credit - Attribution::harvestedFor($testId)) + $late;
+
+            return max(0, Attribution::ownFor($testId) + $instanceOnly);
+        }
+
+        return max(0, $emitted - $credit + $late);
+    }
+
+    /**
      * The assertions that were counted directly on a test object after PHPUnit had already
      * reported that test -- and therefore never entered the run's reported total. Only meaningful
      * once every test coroutine has finished; see CounitExtension.
@@ -265,7 +328,9 @@ class Counit
     public static function sleep(int $seconds): void
     {
         if (Helper::isCoroutineFriendly()) {
+            Attribution::suspended();
             Coroutine::sleep($seconds);
+            Attribution::resumed();
         } else {
             \sleep($seconds);
         }
@@ -285,6 +350,9 @@ class Counit
         if ($count > 0 && $caller instanceof TestCase && !$caller->doesNotPerformAssertions()) {
             $caller->addToAssertionCount($count);
             self::$creditedAssertionCount += $count;
+
+            $testId                        = $caller->valueObjectForEvents()->id();
+            self::$appliedCredits[$testId] = (self::$appliedCredits[$testId] ?? 0) + $count;
         }
     }
 
