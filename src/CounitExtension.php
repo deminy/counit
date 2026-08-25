@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Event\Test\Finished as TestFinished;
+use PHPUnit\Event\Test\FinishedSubscriber as TestFinishedSubscriber;
 use PHPUnit\Event\TestRunner\ExecutionFinished;
 use PHPUnit\Event\TestRunner\ExecutionFinishedSubscriber;
 use PHPUnit\Framework\Assert;
@@ -26,6 +28,22 @@ final class CounitExtension implements Extension
     #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
+        if (Helper::isCoroutineFriendly()) {
+            // Remember the assertion count PHPUnit reports for each test -- the number that enters
+            // the run's total. Compared with the count read inside the test's coroutine once it has
+            // fully finished, this exposes assertions counted directly on the test object *after*
+            // the test was reported (they bypass the static counter, so the residue correction
+            // below cannot see them). Only registered under the coroutine runner: in blocking mode
+            // nothing runs after a test is reported.
+            $facade->registerSubscriber(new class implements TestFinishedSubscriber {
+                #[\Override]
+                public function notify(TestFinished $event): void
+                {
+                    Counit::recordEmittedAssertionCount($event->test()->id(), $event->numberOfAssertionsPerformed());
+                }
+            });
+        }
+
         $facade->registerSubscriber(new class implements ExecutionFinishedSubscriber {
             #[\Override]
             public function notify(ExecutionFinished $event): void
@@ -53,14 +71,18 @@ final class CounitExtension implements Extension
                     // test's window happened to be open when it ran (already part of the reported
                     // total, possibly double-counting an up-front credit), or -- having run after
                     // the last window closed -- in the counter residue drained above. Therefore:
-                    //     true total = reported total - up-front credits + residue
-                    // which holds for both the automatic and the manual approach. The summary
+                    //     true total = reported total - up-front credits + residue + late instance counts
+                    // which holds for both the automatic and the manual approach. The last term
+                    // covers assertions counted directly on a test object -- bypassing the static
+                    // counter -- after PHPUnit had already reported that test, e.g. an
+                    // addToAssertionCount() call made after a sleep/IO yield from the body's tail
+                    // or from a relocated tearDown(); see Counit::lateAssertionCount(). The summary
                     // is printed from the collector only after this event completes, so adjusting
                     // the collector here makes the reported total match a blocking (non-Swoole)
                     // run exactly. The collector has no public mutator (it is fed by events that
                     // have already been dispatched), hence the reflection; if PHPUnit's internals
                     // change, the correction is skipped rather than breaking the run.
-                    $delta = Assert::getCount() - Counit::$creditedAssertionCount;
+                    $delta = Assert::getCount() - Counit::$creditedAssertionCount + Counit::lateAssertionCount();
                     if ($delta !== 0) {
                         try {
                             $collector = (new \ReflectionProperty(TestResultFacade::class, 'collector'))->getValue();

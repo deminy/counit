@@ -33,6 +33,18 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ### Bug fixes
 
+- **Stop losing assertions counted directly on the test object after its first yield.** PHPUnit counts most
+  assertions through `Assert`'s static counter, which counit's credit+residue correction reconciles exactly — but an
+  `addToAssertionCount()` call writes to the test object directly, bypassing that counter. Made from code that runs
+  after the test's coroutine has yielded — the body's tail after a `sleep()`/IO call, a relocated `tearDown()` or
+  `#[After]` hook, `tearDownCoroutine()`, or a `Counit::defer()` callback — the count landed on the test object after
+  PHPUnit had already reported the test, and silently vanished from the run's total while the run still exited 0.
+  counit now records the count PHPUnit reports for each test (via a `Test\Finished` subscriber) and the test's final
+  count once its coroutine has fully finished, and adds the difference back in the end-of-run correction:
+  `true total = reported − credits + residue + late instance counts`. Mock `->expects()` verification was never
+  affected on this branch — it runs before the test is reported and is counted exactly (new compatibility tests pin
+  that down for both approaches); a mock satisfied only after a yield remains a documented limitation.
+
 - **Support `#[DoesNotPerformAssertions]` and `expectNotToPerformAssertions()` in both approaches.** Every test used
   to be credited one assertion up front (to suppress the "did not perform any assertions" warning for assertions that
   run after a sleep/IO yield), which made PHPUnit flag any test declaring it performs no assertions as risky ("This

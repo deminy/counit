@@ -52,6 +52,28 @@ class Counit
     private static array $deferred = [];
 
     /**
+     * Per test (keyed by the test's event ID): the assertion count PHPUnit reported for it in its
+     * `Test\Finished` event -- i.e. the number that entered the run's reported total. Populated by
+     * the subscriber CounitExtension registers, and only under Swoole.
+     *
+     * @var array<string, int>
+     */
+    private static array $emittedAssertionCounts = [];
+
+    /**
+     * Per test (keyed the same way): the test's final assertion count, read inside its coroutine
+     * once everything that can still count assertions on the test object -- the body, cleanup
+     * hooks, deferred callbacks -- has run. Where this exceeds the emitted count, the difference
+     * was counted directly on the test object *after* PHPUnit had already reported the test (an
+     * addToAssertionCount() call made after a sleep/IO yield, e.g. from the body's tail or from a
+     * relocated tearDown()). Such counts bypass PHPUnit's static assertion counter, so the
+     * end-of-run residue correction cannot see them; CounitExtension adds the difference back.
+     *
+     * @var array<string, int>
+     */
+    private static array $finalAssertionCounts = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -81,7 +103,7 @@ class Counit
             $caught          = null;
             $alreadyReturned = false;
 
-            $id = Coroutine::create(function () use ($callable, &$caught, &$alreadyReturned, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, &$caught, &$alreadyReturned, $description): void {
                 try {
                     $callable();
                 } catch (\Throwable $e) {
@@ -105,6 +127,13 @@ class Counit
                         } elseif ($caught === null) {
                             $caught = $e;
                         }
+                    }
+
+                    // Recorded last, once everything that can still count assertions on the test
+                    // object -- the body, cleanup hooks, deferred callbacks -- has run; see
+                    // $finalAssertionCounts.
+                    if ($caller instanceof TestCase) {
+                        self::recordFinalAssertionCount($caller);
                     }
                 }
             });
@@ -178,6 +207,41 @@ class Counit
     }
 
     /**
+     * Remembers the assertion count PHPUnit just reported for a test; called by the Test\Finished
+     * subscriber CounitExtension registers under Swoole.
+     */
+    public static function recordEmittedAssertionCount(string $testId, int $count): void
+    {
+        self::$emittedAssertionCounts[$testId] = $count;
+    }
+
+    /**
+     * The assertions that were counted directly on a test object after PHPUnit had already
+     * reported that test -- and therefore never entered the run's reported total. Only meaningful
+     * once every test coroutine has finished; see CounitExtension.
+     */
+    public static function lateAssertionCount(): int
+    {
+        $late = 0;
+
+        foreach (self::$finalAssertionCounts as $testId => $finalCount) {
+            $emitted = self::$emittedAssertionCounts[$testId] ?? null;
+            if ($emitted === null) {
+                continue;
+            }
+
+            // A final count at or below the emitted one only means the coroutine finished before
+            // PHPUnit reported the test -- e.g. a body that never yielded, whose harvested window
+            // and credit were applied afterwards. Nothing ran late then.
+            if ($finalCount > $emitted) {
+                $late += $finalCount - $emitted;
+            }
+        }
+
+        return $late;
+    }
+
+    /**
      * Delays the program execution for the given number of seconds. It works asynchronously when possible, otherwise
      * it works the same as PHP function sleep().
      */
@@ -204,6 +268,21 @@ class Counit
         if ($count > 0 && $caller instanceof TestCase && !$caller->doesNotPerformAssertions()) {
             $caller->addToAssertionCount($count);
             self::$creditedAssertionCount += $count;
+        }
+    }
+
+    /**
+     * Records a test's assertion count as read inside its coroutine after everything has run. The
+     * maximum wins: a test may wrap several coroutines (manual approach), and the instance counter
+     * only ever grows within a test's lifecycle, so the highest reading is the latest one.
+     */
+    private static function recordFinalAssertionCount(TestCase $test): void
+    {
+        $testId = $test->valueObjectForEvents()->id();
+        $count  = $test->numberOfAssertionsPerformed();
+
+        if ($count > (self::$finalAssertionCounts[$testId] ?? -1)) {
+            self::$finalAssertionCounts[$testId] = $count;
         }
     }
 

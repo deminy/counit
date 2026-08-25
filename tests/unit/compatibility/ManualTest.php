@@ -108,4 +108,21 @@ class ManualTest extends TestCase
             1 // The wrapped function call has one delayed assertion in it.
         );
     }
+
+    /**
+     * An addToAssertionCount() call made after the wrapped callable's first yield writes to the
+     * test object directly, after PHPUnit already reported this test's count; the late-count
+     * correction must include it. Two assertions: the assertTrue() and the direct count.
+     */
+    public function testCountAddedAfterTheYield(): void
+    {
+        Counit::create(
+            function (): void {
+                self::assertTrue(true);
+                Counit::sleep(1);
+                $this->addToAssertionCount(1);
+            },
+            1 // The wrapped function call has one delayed assertion in it.
+        );
+    }
 }

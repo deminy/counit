@@ -40,4 +40,4 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (33 tests, 33 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (39 tests, 46 assertions)' /tmp/compatibility.log
