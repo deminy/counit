@@ -75,7 +75,15 @@ class Counit
             $caller = $trace[1]['object'] ?? null;
 
             if ($caller instanceof TestCase) {
-                self::$testResult = $caller->getTestResultObject();
+                $testResult = $caller->getTestResultObject();
+                if ($testResult !== null) {
+                    self::$testResult = $testResult;
+                    // Registered here, rather than from CounitExtension, because the listener has
+                    // to sit *after* PHPUnit's own result printer in the TestResult's listener
+                    // list: it snapshots the very count the printer just consumed. See
+                    // AssertionCountListener.
+                    AssertionCountListener::attach($testResult);
+                }
             }
 
             if ($count > 0) {

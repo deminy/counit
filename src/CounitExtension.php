@@ -42,9 +42,17 @@ class CounitExtension implements AfterLastTestHook
             // to be open when it ran (already part of the reported total, possibly double-counting
             // an up-front credit), or -- having run after the last window closed -- in the counter
             // residue drained above. Therefore:
-            //     true total = reported total - up-front credits + residue
-            // which holds for both the automatic and the manual approach.
-            $this->correctAssertionCount(Assert::getCount() - Counit::$creditedAssertionCount);
+            //     true total = reported total - up-front credits + residue + late instance counts
+            // which holds for both the automatic and the manual approach. The last term covers the
+            // assertions PHPUnit counts on the test object instead of through the static counter --
+            // mock/prophecy verification and the exception-expectation checks -- which run inside
+            // the test's coroutine, after PHPUnit read that test's count; see
+            // AssertionCountListener.
+            $this->correctAssertionCount(
+                Assert::getCount()
+                - Counit::$creditedAssertionCount
+                + AssertionCountListener::lostAssertionCount()
+            );
         }
     }
 
