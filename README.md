@@ -232,6 +232,10 @@ class SleepTest extends TestCase
 }
 ```
 
+The 2nd parameter is a request rather than a command: for a test that declares it performs no assertions (through
+annotation _@doesNotPerformAssertions_ or method _expectNotToPerformAssertions()_), _Counit::create()_ declines the
+credit — crediting such a test would make _PHPUnit_ report it as risky.
+
 To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
@@ -323,6 +327,17 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. Because of this, the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
   * The total # of assertions reported at the end of a run matches _PHPUnit_, but per-test assertion counts (as shown in verbose/TestDox-style output) may be attributed to a different test than the one that performed them.
   * Some exceptions/errors are not handled/reported the same.
+* Annotation _@doesNotPerformAssertions_ and method _expectNotToPerformAssertions()_ (when called in _setUp()_ or at
+  the top of the test body) are supported in both approaches: such tests report clean with zero assertions, same as
+  under _PHPUnit_. Remaining limitations, both consequences of the risky verdict being rendered when the test's
+  coroutine first yields:
+  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is not
+    flagged risky under _counit_, while _PHPUnit_ flags it. Run totals stay exact either way, and a *failing* late
+    assertion still fails the run.
+  * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
+    risky occasionally — the per-test attribution caveat above.
+  * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
+    method-level annotation is honored), with or without _counit_.
 
 # Local Development
 
@@ -344,7 +359,6 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 # TODOs
 
 * Better integration with _PHPUnit_.
-  * Deal with annotation _@doesNotPerformAssertions_ in the automatic approach.
   * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
 * Better error/exception handling.
 

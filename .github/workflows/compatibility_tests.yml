@@ -37,4 +37,10 @@ jobs:
         run: composer install -nq --no-progress
 
       - name: Test Compatibility with PHPUnit
-        run: ./counit --testsuite compatibility
+        # Assert the exact summary line, not just the exit code: a miscount or a risky test -- e.g.
+        # a falsely credited @doesNotPerformAssertions test -- changes the summary while the run
+        # still exits 0. The expected result is identical with and without Swoole.
+        run: |
+          set -o pipefail
+          ./counit --testsuite compatibility | tee /tmp/compatibility.log
+          grep -qF 'OK (21 tests, 22 assertions)' /tmp/compatibility.log

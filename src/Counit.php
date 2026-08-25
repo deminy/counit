@@ -13,9 +13,11 @@ use Swoole\Coroutine;
 class Counit
 {
     /**
-     * Sum of all assertion counts credited to tests up front via creditAssertionCount(): the
-     * explicit $count values passed by manual-approach tests, plus the single credit
-     * TestCase::runBare() records for every automatic-approach test. These credits stand in for
+     * Sum of all assertion counts actually credited to tests via creditAssertionCount(): the
+     * $count values applied for manual-approach tests, plus the single credit
+     * TestCase::runBare() records for every automatic-approach test. (A requested credit is
+     * declined -- and therefore not ledgered here -- for a test that declares it performs no
+     * assertions; see creditAssertionCount().) These credits stand in for
      * assertions that will only run later inside a coroutine -- but those assertions ALSO increment
      * PHPUnit's static assertion counter when they eventually run, so they either get harvested
      * into whatever test happens to be current at that moment (double-counting them) or, after the
@@ -59,7 +61,10 @@ class Counit
      * as under PHPUnit.
      *
      * @param int $count an optional parameter to suppress warning message "This test did not perform any assertions",
-     *                   and to make the counters match
+     *                   and to make the counters match. The credit is a request: it is declined for a test that
+     *                   declares -- through the annotation @doesNotPerformAssertions or a call to method
+     *                   expectNotToPerformAssertions() -- that it performs no assertions, since PHPUnit would
+     *                   otherwise report the credited test as risky.
      * @return int return 0 if not running inside a coroutine; otherwise, return the coroutine ID, or -1 when failed
      *             creating a new coroutine to run the tests
      */
@@ -124,6 +129,21 @@ class Counit
      */
     public static function creditAssertionCount(TestCase $test, int $count): void
     {
+        // A test that declares it performs no assertions -- through the annotation
+        // @doesNotPerformAssertions or a call to expectNotToPerformAssertions() -- must not be
+        // credited: PHPUnit would then report it as risky ('This test is annotated with
+        // "@doesNotPerformAssertions" but performed 1 assertions'). The credit would serve no
+        // purpose there anyway (PHPUnit never emits the "did not perform any assertions" warning
+        // for such a test), and CounitExtension subtracts every credit from the run's total again,
+        // so declining it costs nothing. The flag is always settled by the time this runs: PHPUnit
+        // resolves the annotation inside its own runBare() -- before setUp() and before anything
+        // that can yield under counit's hook mask -- which the automatic approach runs inside the
+        // coroutine that create() has already waited on, and which for a manual-approach test
+        // completed on the main coroutine before the test method (and its create() call) started.
+        if ($test->doesNotPerformAssertions()) {
+            return;
+        }
+
         $test->addToAssertionCount($count);
         self::$creditedAssertionCount += $count;
     }

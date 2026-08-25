@@ -68,4 +68,22 @@ class ManualTest extends TestCase
         self::expectException(\Exception::class);
         throw new \Exception();
     }
+
+    /**
+     * Counit::create() must decline the requested assertion credit for a test that declares it
+     * performs no assertions, even when the test explicitly asks for one (e.g. a $count left behind
+     * after the annotation was added); otherwise PHPUnit reports the test as risky. In blocking mode
+     * the $count argument is ignored altogether, so both modes report this test clean.
+     *
+     * @doesNotPerformAssertions
+     */
+    public function testDoesNotPerformAssertions(): void
+    {
+        Counit::create(
+            function () {
+                Counit::sleep(1);
+            },
+            1 // Requested on purpose: the credit must be declined for this test.
+        );
+    }
 }

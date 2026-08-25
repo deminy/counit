@@ -58,7 +58,10 @@ class TestCase extends BaseTestCase
             // any assertions" warning (its real assertions usually run only after PHPUnit has read
             // the count) and is subtracted again from the run's total by CounitExtension. This
             // replaces expectNotToPerformAssertions(), which instead flagged a test as risky
-            // whenever one of its assertions happened to run early.
+            // whenever one of its assertions happened to run early. creditAssertionCount() declines
+            // the credit for a test that declares -- through the annotation
+            // @doesNotPerformAssertions or its own expectNotToPerformAssertions() call -- that it
+            // performs no assertions, so such tests are not falsely reported as risky.
             //
             // The credit has to be applied *after* create() returns rather than before it, because
             // PHPUnit's own runBare() -- running inside the coroutine -- starts by zeroing the

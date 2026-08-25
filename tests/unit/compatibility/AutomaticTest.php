@@ -53,4 +53,38 @@ class AutomaticTest extends TestCase
         self::expectException(\Exception::class);
         throw new \Exception();
     }
+
+    /**
+     * A test that declares it performs no assertions must not receive the up-front assertion credit;
+     * otherwise PHPUnit reports it as risky ('This test is annotated with "@doesNotPerformAssertions"
+     * but performed 1 assertions'). Here the test body finishes without yielding.
+     *
+     * @doesNotPerformAssertions
+     */
+    public function testDoesNotPerformAssertions(): void
+    {
+    }
+
+    /**
+     * Same as above, but the test body yields first, so the credit decision in runBare() is made
+     * while the coroutine is still pending -- the path where the credit used to be applied
+     * unconditionally.
+     *
+     * @doesNotPerformAssertions
+     */
+    public function testDoesNotPerformAssertionsAfterAYield(): void
+    {
+        sleep(1);
+    }
+
+    /**
+     * expectNotToPerformAssertions() sets the same PHPUnit flag as the annotation. Called at the top
+     * of the test body it runs inside the coroutine before its first yield, so it is already visible
+     * when the credit decision is made after Counit::create() returns.
+     */
+    public function testExpectNotToPerformAssertions(): void
+    {
+        $this->expectNotToPerformAssertions();
+        sleep(1);
+    }
 }
