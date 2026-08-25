@@ -9,6 +9,21 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ## Unreleased
 
+### Bug fixes
+
+- **Support `#[DoesNotPerformAssertions]` and `expectNotToPerformAssertions()` in both approaches.** Every test used
+  to be credited one assertion up front (to suppress the "did not perform any assertions" warning for assertions that
+  run after a sleep/IO yield), which made PHPUnit flag any test declaring it performs no assertions as risky ("This
+  test is not expected to perform assertions but performed 1 assertion"). `Counit::create()` now applies the credit
+  only after the test body has run up to its first yield, and declines it for a test that declares — through the
+  attribute (at method or class level), or a call in `setUp()` or at the top of the test body — that it performs no
+  assertions. Such tests now report clean with zero assertions, identical to blocking mode; run totals remain exact.
+  Two consequences worth noting: `Counit::create()`'s `$count` argument is now a request the library declines for such
+  tests, and a manual-approach test whose callable throws before its first yield is no longer credited, so under
+  `failOnRisky` it may newly report "did not perform any assertions" — matching what plain PHPUnit already reported.
+  Remaining limitation (documented in the README): a test declaring no assertions but performing one only after a
+  yield is not flagged risky under counit, since the risky verdict is rendered at the first yield.
+
 ### Changes
 
 - **Renamed the two test-adaptation approaches**: the "global" style is now the **automatic approach**, and the

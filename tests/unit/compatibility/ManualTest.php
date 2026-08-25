@@ -6,6 +6,7 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\Counit;
 use Exception;
+use PHPUnit\Framework\Attributes\DoesNotPerformAssertions;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -67,5 +68,22 @@ class ManualTest extends TestCase
     {
         self::expectException(\Exception::class);
         throw new \Exception();
+    }
+
+    /**
+     * Counit::create() must decline the requested assertion credit for a test that declares it
+     * performs no assertions, even when the test explicitly asks for one (e.g. a $count left behind
+     * after the attribute was added); otherwise PHPUnit reports the test as risky. In blocking mode
+     * the $count argument is ignored altogether, so both modes report this test clean.
+     */
+    #[DoesNotPerformAssertions]
+    public function testDoesNotPerformAssertions(): void
+    {
+        Counit::create(
+            function (): void {
+                Counit::sleep(1);
+            },
+            1 // Requested on purpose: the credit must be declined for this test.
+        );
     }
 }

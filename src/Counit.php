@@ -13,15 +13,17 @@ use Swoole\Coroutine;
 class Counit
 {
     /**
-     * Sum of all assertion counts credited to tests up front via addToAssertionCount() in create():
-     * the explicit $count values passed by manual-approach tests, plus the single credit
-     * TestCase::invokeTestMethod() passes for every automatic-approach test. These credits stand in for
-     * assertions that will only run later inside a coroutine -- but those assertions ALSO increment
-     * PHPUnit's static assertion counter when they eventually run, so they either get harvested
-     * into whatever test happens to be current at that moment (double-counting them) or, after the
-     * last test, never get harvested at all. CounitExtension uses this ledger together with the
-     * counter residue left after draining all coroutines to correct the run's reported assertion
-     * total to exactly what a blocking (non-Swoole) run would have reported.
+     * Sum of all assertion counts actually credited to tests via addToAssertionCount() in create():
+     * the $count values applied for manual-approach tests, plus the single credit
+     * TestCase::invokeTestMethod() requests for every automatic-approach test. (A requested credit is
+     * declined -- and therefore not ledgered here -- for a test that declares it performs no
+     * assertions; see creditCaller().) These credits stand in for assertions that will only run later
+     * inside a coroutine -- but those assertions ALSO increment PHPUnit's static assertion counter
+     * when they eventually run, so they either get harvested into whatever test happens to be current
+     * at that moment (double-counting them) or, after the last test, never get harvested at all.
+     * CounitExtension uses this ledger together with the counter residue left after draining all
+     * coroutines to correct the run's reported assertion total to exactly what a blocking (non-Swoole)
+     * run would have reported.
      */
     public static int $creditedAssertionCount = 0;
 
@@ -46,7 +48,9 @@ class Counit
      * as under PHPUnit.
      *
      * @param int $count an optional parameter to suppress warning message "This test did not perform any assertions",
-     *                   and to make the counters match
+     *                   and to make the counters match. The credit is a request: it is declined for a test that
+     *                   declares -- through #[DoesNotPerformAssertions] or expectNotToPerformAssertions() -- that it
+     *                   performs no assertions, since PHPUnit would otherwise report the credited test as risky.
      * @return int return 0 if not running inside a coroutine; otherwise, return the coroutine ID, or -1 when failed
      *             creating a new coroutine to run the tests
      */
@@ -56,13 +60,9 @@ class Counit
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
 
-            if ($count > 0) {
-                if ($caller instanceof TestCase) {
-                    $caller->addToAssertionCount($count);
-                    self::$creditedAssertionCount += $count;
-                } else {
-                    throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
-                }
+            // Validation stays ahead of the spawn, so a misuse still fails before a coroutine is created.
+            if ($count > 0 && !$caller instanceof TestCase) {
+                throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
             }
 
             $description = $caller instanceof TestCase
@@ -92,6 +92,15 @@ class Counit
                 throw $caught;
             }
 
+            // The credit is applied only now, after the coroutine spawned: the test body has run up
+            // to its first yield (or to completion), so the does-not-perform-assertions declaration
+            // is fully resolved at this point -- whether made through the attribute (read by
+            // PHPUnit's runBare() before the test method is invoked), a call in setUp(), or an
+            // expectNotToPerformAssertions() call at the top of the test body itself. It also means
+            // a callable that threw synchronously above is never credited, which matches blocking
+            // mode: PHPUnit does not count assertions a test never got to perform.
+            self::creditCaller($caller, $count);
+
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
         }
 
@@ -109,6 +118,23 @@ class Counit
             Coroutine::sleep($seconds);
         } else {
             \sleep($seconds);
+        }
+    }
+
+    /**
+     * Credits the calling test with $count assertions up front, unless it declared -- through
+     * #[DoesNotPerformAssertions] or expectNotToPerformAssertions() -- that it performs none, in
+     * which case PHPUnit would report the credited test as risky ("This test is not expected to
+     * perform assertions but performed 1 assertion"). Kept as a separate method on purpose: inlining
+     * the check into create() trips PHPStan level 9 (the caller was already type-checked before the
+     * coroutine spawned, making an inline instanceof provably redundant), while a fresh scope keeps
+     * the guard self-contained.
+     */
+    private static function creditCaller(?object $caller, int $count): void
+    {
+        if ($count > 0 && $caller instanceof TestCase && !$caller->doesNotPerformAssertions()) {
+            $caller->addToAssertionCount($count);
+            self::$creditedAssertionCount += $count;
         }
     }
 }

@@ -229,6 +229,10 @@ class SleepTest extends TestCase
 }
 ```
 
+The 2nd parameter is a request rather than a command: for a test that declares it performs no assertions (through
+attribute _#[DoesNotPerformAssertions]_ or method _expectNotToPerformAssertions()_), _Counit::create()_ declines the
+credit — crediting such a test would make _PHPUnit_ report it as risky.
+
 To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/master/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
@@ -335,6 +339,18 @@ faster, with limitations apply. Here is a list of limitations of this package:
     can start (and run to completion) even when the dependency later fails.
   * More generally, _#[Depends]_ serializes exactly what _counit_ exists to overlap. Tests chained through _#[Depends]_
     are better kept under plain _PHPUnit_ (or restructured to share fixtures another way) than run through _counit_.
+* Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
+  called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
+  zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being
+  rendered when the test's coroutine first yields:
+  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is not
+    flagged risky under _counit_, while _PHPUnit_ flags it ("This test is not expected to perform assertions but
+    performed 1 assertion"). Run totals stay exact either way, and a *failing* late assertion still fails the run.
+  * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
+    risky occasionally — the per-test attribution caveat above, wearing a different hat.
+* A related behavior note for projects running with `failOnRisky` enabled: a manual-approach test whose wrapped
+  callable throws before its first yield no longer receives the assertion credit, so it may now report "This test did
+  not perform any assertions" under _counit_ — which is exactly what plain _PHPUnit_ was already reporting for it.
 
 # Local Development
 
@@ -356,7 +372,6 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 # TODOs
 
 * Better integration with _PHPUnit_.
-  * Deal with attribute _#[DoesNotPerformAssertions]_ in the automatic approach.
   * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
   * Support attribute _#[Depends]_ in the automatic approach: pass producer tests' real return values through to dependent
     tests (currently _NULL_ — see [Additional Notes](#additional-notes)), and only run dependents once their

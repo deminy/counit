@@ -58,12 +58,15 @@ class TestCase extends BaseTestCase
     protected function invokeTestMethod(string $methodName, array $testArguments): mixed
     {
         if (Helper::isCoroutineFriendly()) {
-            // The second argument credits this test with one assertion up front. That suppresses
+            // The second argument requests one assertion credit for this test. That suppresses
             // the "This test did not perform any assertions" warning (the test's real assertions
             // usually run after PHPUnit has already read its count; see Counit::create()) without
             // using expectNotToPerformAssertions(), which would instead flag the test as risky
-            // whenever one of its assertions happens to run early. The credit is subtracted again
-            // from the run's total by CounitExtension's end-of-run correction.
+            // whenever one of its assertions happens to run early. Counit::create() declines the
+            // credit for a test that declares -- through #[DoesNotPerformAssertions] or
+            // expectNotToPerformAssertions() -- that it performs no assertions, so such tests are
+            // not falsely reported as risky. Applied credits are subtracted again from the run's
+            // total by CounitExtension's end-of-run correction.
             Counit::create(function () use ($methodName, $testArguments): void {
                 parent::invokeTestMethod($methodName, $testArguments);
             }, 1);

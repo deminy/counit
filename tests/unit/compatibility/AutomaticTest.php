@@ -6,6 +6,7 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\TestCase;
 use Exception;
+use PHPUnit\Framework\Attributes\DoesNotPerformAssertions;
 
 /**
  * To test and check compatibility with PHPUnit.
@@ -52,5 +53,37 @@ class AutomaticTest extends TestCase
     {
         self::expectException(\Exception::class);
         throw new \Exception();
+    }
+
+    /**
+     * A test that declares it performs no assertions must not receive the up-front assertion credit;
+     * otherwise PHPUnit reports it as risky ("This test is not expected to perform assertions but
+     * performed 1 assertion"). Here the test body finishes without yielding.
+     */
+    #[DoesNotPerformAssertions]
+    public function testDoesNotPerformAssertions(): void
+    {
+    }
+
+    /**
+     * Same as above, but the test body yields first, so the credit decision in Counit::create() is
+     * made while the coroutine is still pending -- the path where the credit used to be applied
+     * unconditionally.
+     */
+    #[DoesNotPerformAssertions]
+    public function testDoesNotPerformAssertionsAfterAYield(): void
+    {
+        sleep(1);
+    }
+
+    /**
+     * expectNotToPerformAssertions() sets the same PHPUnit flag as the attribute. Called at the top
+     * of the test body it runs before the first yield, so it is already visible when Counit::create()
+     * decides whether to apply the credit.
+     */
+    public function testExpectNotToPerformAssertions(): void
+    {
+        $this->expectNotToPerformAssertions();
+        sleep(1);
     }
 }
