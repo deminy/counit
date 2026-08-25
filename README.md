@@ -22,7 +22,6 @@ Table of Contents
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
-* [TODOs](#todos)
 * [License](#license)
 
 # How Does It Work
@@ -455,24 +454,6 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 * Process isolation in PHPUnit. This allows to run tests in separate PHP processes.
 * Package [brianium/paratest](https://github.com/paratestphp/paratest)
 * Package [pestphp/pest](https://pestphp.com)
-
-# TODOs
-
-* Better integration with _PHPUnit_.
-  * Support attribute _#[Depends]_ in the automatic approach: pass producer tests' real return values through to dependent
-    tests (currently _NULL_ — see [Additional Notes](#additional-notes)), and only run dependents once their
-    dependencies have actually finished (not just yielded). Until then, the limitation is documented above.
-  * Make the per-testcase # of assertions in `--log-junit` output exact for *all* tests. Segment accounting already
-    makes every test with observable yields exact; a yield counit cannot observe (hooked network IO, a
-    fully-qualified `\sleep()` call, a test class in the global namespace) still leaves that test's count too low.
-    Full exactness needs every coroutine resume to be observable — runtime or upstream support, e.g. a Swoole
-    coroutine-switch callback or a _PHPUnit_ assertion-counter sink. `--log-otr` output has no correction yet.
-* Pursue an upstream _PHPUnit_ extension point for the after-test phase — the counterpart of _invokeTestMethod()_ from
-  [phpunit#6450](https://github.com/sebastianbergmann/phpunit/issues/6450): it would replace the internals-based
-  takeover of _tearDown()_/_#[After]_ hooks with supported API, and a similar seam around mock verification is the
-  only way to make _->expects()_ on a mock called after a yield behave correctly (see
-  [Compatibility with PHPUnit](#compatibility-with-phpunit)).
-* Better error/exception handling.
 
 # License
 
