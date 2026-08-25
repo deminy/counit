@@ -21,7 +21,6 @@ Table of Contents
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
-* [TODOs](#todos)
 * [License](#license)
 
 # How Does It Work
@@ -369,12 +368,6 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 * Process isolation in PHPUnit. This allows to run tests in separate PHP processes.
 * Package [brianium/paratest](https://github.com/paratestphp/paratest)
 * Package [pestphp/pest](https://pestphp.com)
-
-# TODOs
-
-* Better integration with _PHPUnit_.
-  * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
-* Better error/exception handling.
 
 # License
 
