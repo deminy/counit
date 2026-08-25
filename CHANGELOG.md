@@ -42,9 +42,12 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
   across classes, `#[DependsOnClass]` for whole classes), and skips dependents of a failed producer exactly as in
   blocking mode. Only the joined producer loses its own concurrency — its dependents could never have overlapped
   with it anyway — while every unrelated test keeps overlapping, including during the wait: a dependency chain runs
-  in its blocking-mode duration, nothing else slows down. The new `Counit::createAndJoin()` offers the same
-  run-to-completion semantics to manual-approach producers. (A producer using a data provider still passes `NULL` —
-  plain PHPUnit refuses to record return values for those; upstream behavior.)
+  in its blocking-mode duration, nothing else slows down. A joined producer's `tearDown()`/`#[After]` hooks are
+  also handed back to PHPUnit's native invocation — with the body complete, the native timing is correct again — so
+  a throwing `tearDown()` errors the producer (and skips its dependents) exactly as in blocking mode, instead of
+  surfacing in the deferred end-of-run block. The new `Counit::createAndJoin()` offers the same run-to-completion
+  semantics to manual-approach producers. (A producer using a data provider still passes `NULL` — plain PHPUnit
+  refuses to record return values for those; upstream behavior.)
 
 ### Bug fixes
 

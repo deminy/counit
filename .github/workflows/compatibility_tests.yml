@@ -80,6 +80,17 @@ jobs:
           ! grep -qF 'the dependent of a failed producer must be skipped' /tmp/depends-fail.log
           # ... and the producer's failure must be a real one, not a deferred end-of-run notice.
           ! grep -qF 'already been reported as passed' /tmp/depends-fail.err
+          # A joined producer's after-test hooks run natively: a throwing tearDown() errors the
+          # producer itself (exit 2, no deferred block) and its dependent is skipped -- while a
+          # later non-joined test of the same class still gets the relocated (post-body) hooks,
+          # and a SECOND join cycle in the same class still delivers its value.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsTearDownTest.php > /tmp/depends-td.log 2> /tmp/depends-td.err || rc=$?
+          cat /tmp/depends-td.log /tmp/depends-td.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 6, Assertions: 5, Errors: 1, Skipped: 1.' /tmp/depends-td.log
+          ! grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log
+          ! grep -qF 'already been reported as passed' /tmp/depends-td.err
 
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the

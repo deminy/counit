@@ -355,9 +355,9 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
 | `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` | ❌ snapshot/restore fires while other tests are mid-flight | ❌ (annotations) |
-| `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished | ✅ runs after the finished body |
+| `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished — except on a joined `#[Depends]` producer, whose whole after-test phase is PHPUnit's own | ✅ runs after the finished body |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
-| A `tearDown()` that throws | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error | ⚠️ same |
+| A `tearDown()` / `#[After]` hook that throws | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error — except on a joined `#[Depends]` producer, whose hooks run natively and error the test exactly as under PHPUnit | ⚠️ same, without the producer exception |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
 | Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
 | `--enforce-time-limit` | ❌ only measures up to the first yield | ❌ |
@@ -399,6 +399,14 @@ faster, with limitations apply. Here is a list of limitations of this package:
     but every unrelated test still overlaps with it, including while it waits. A _#[Depends]_ chain runs in exactly
     its blocking-mode duration; everything else is unaffected. For _#[DependsOnClass]_, every test of the depended-on
     class is joined (the class-passed verdict needs all of them finished).
+  * A joined producer's _tearDown()_/_#[After]_ hooks are handed back to _PHPUnit_'s native invocation for that run:
+    with the body complete inside _invokeTestMethod()_, the native timing is correct again — so a throwing
+    _tearDown()_ errors the producer exactly as under blocking _PHPUnit_ (and skips its dependents), instead of
+    surfacing in the deferred end-of-run block as it does for non-joined tests. The same goes for the producer's
+    whole after-test phase, `assertPostConditions()` included. _tearDownCoroutine()_ stays counit-owned and is not
+    part of this hand-back: it still runs inside the coroutine right after the body — for a joined producer its
+    failure is always attributed to the body path (the join runs to completion, so the before/after-first-yield
+    split documented for non-joined tests does not arise).
   * In the manual approach, a producer computing its return value inside _Counit::create()_ still loses it (the
     callable's result is only available if it finishes before its first yield). Use _Counit::createAndJoin()_ instead
     for such producers: it runs the callable in a coroutine, waits for it, and returns its value / rethrows its

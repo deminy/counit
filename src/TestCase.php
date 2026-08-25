@@ -46,6 +46,17 @@ class TestCase extends BaseTestCase
     private static array $relocatedAfterHooks = [];
 
     /**
+     * Per concrete test class whose after-test hooks were successfully taken over: the cached
+     * hook collection object, its original private method list, and whether PHPUnit's own
+     * invocation is currently suppressed. Kept so the suppression can be flipped per test: a
+     * joined #[Depends] producer hands the hooks back to PHPUnit for its own run (see
+     * setAfterTestHookSuppression()), and the next test of the class re-suppresses them.
+     *
+     * @var array<class-string, array{collection: HookMethodCollection, original: mixed, suppressed: bool}>
+     */
+    private static array $takenOverAfterHookState = [];
+
+    /**
      * Names of classes the takeover-failure notice was already issued for.
      *
      * @var array<class-string, true>
@@ -117,14 +128,25 @@ class TestCase extends BaseTestCase
             // It costs that one test its own concurrency; every other test still overlaps with it,
             // including while it waits.
             if (DependencyMap::isProducer(static::class, $this->name())) {
-                return Counit::createAndJoin(function () use ($methodName, $testArguments): mixed {
+                // The body will have fully run before this method returns, so PHPUnit's own
+                // after-test hook timing is correct again for this one test: hand the hooks back
+                // to the native invocation, which also restores its exact error semantics -- a
+                // throwing tearDown() errors the test, instead of landing in the deferred
+                // end-of-run block the relocated replay must use. The next test of the class
+                // re-suppresses the hooks through the lazy takeover path above; should the
+                // restore itself ever fail, the replay is used, exactly as for non-joined tests.
+                $restored = self::setAfterTestHookSuppression(false);
+
+                return Counit::createAndJoin(function () use ($methodName, $testArguments, $restored): mixed {
                     try {
                         return parent::invokeTestMethod($methodName, $testArguments);
                     } finally {
                         try {
                             $this->tearDownCoroutine();
                         } finally {
-                            $this->invokeRelocatedAfterTestHooks();
+                            if (!$restored) {
+                                $this->invokeRelocatedAfterTestHooks();
+                            }
                         }
                     }
                 });
@@ -193,6 +215,18 @@ class TestCase extends BaseTestCase
     private static function takeOverAfterTestHooks(): void
     {
         if (isset(self::$relocatedAfterHooks[static::class])) {
+            // A joined #[Depends] producer hands the hooks back to PHPUnit for its own run;
+            // re-suppress them for this test (a no-op when they are already suppressed). Should
+            // the re-suppression ever fail, the class degrades to the failed-takeover mode --
+            // hooks run natively (early), exactly once, with the loud notice -- rather than
+            // risking PHPUnit's native invocation AND the relocated replay both running.
+            if (!self::setAfterTestHookSuppression(true)) {
+                $hooks                                    = self::$relocatedAfterHooks[static::class];
+                self::$relocatedAfterHooks[static::class] = [];
+                unset(self::$takenOverAfterHookState[static::class]);
+                self::warnAfterTestHookTakeoverFailed($hooks);
+            }
+
             return;
         }
         self::$relocatedAfterHooks[static::class] = [];
@@ -227,9 +261,48 @@ class TestCase extends BaseTestCase
                 return;
             }
 
-            self::$relocatedAfterHooks[static::class] = $names;
+            self::$relocatedAfterHooks[static::class]      = $names;
+            self::$takenOverAfterHookState[static::class]  = [
+                'collection' => $collection,
+                'original'   => $original,
+                'suppressed' => true,
+            ];
         } catch (\Throwable) {
             self::warnAfterTestHookTakeoverFailed([]);
+        }
+    }
+
+    /**
+     * Suppresses or restores PHPUnit's own invocation of the class's taken-over after-test hooks,
+     * by pointing the cached hook collection back at its original method list (or at the poison
+     * name again). A joined #[Depends] producer restores the native invocation for its own run:
+     * its body is fully finished inside invokeTestMethod(), so PHPUnit's hook timing is correct
+     * again there, along with its exact error handling -- a throwing tearDown() errors the test,
+     * just as in blocking mode. Returns whether the collection is now in the requested state
+     * (true also when there is nothing to flip, because no hooks were taken over for the class).
+     */
+    private static function setAfterTestHookSuppression(bool $suppressed): bool
+    {
+        $state = self::$takenOverAfterHookState[static::class] ?? null;
+        if ($state === null || $state['suppressed'] === $suppressed) {
+            return true;
+        }
+
+        try {
+            // No post-write self-check here, unlike the takeover itself: the takeover already
+            // verified that suppressing THIS collection through THIS property works, and a plain
+            // property write on a verified collection cannot half-succeed.
+            (new \ReflectionProperty(HookMethodCollection::class, 'hookMethods'))->setValue(
+                $state['collection'],
+                $suppressed ? [new HookMethod(self::AFTER_HOOKS_SUPPRESSED, 0)] : $state['original']
+            );
+            self::$takenOverAfterHookState[static::class]['suppressed'] = $suppressed;
+
+            return true;
+        } catch (\Throwable) {
+            // The takeover self-check passed for this collection, so this cannot realistically
+            // fail; if it ever does, the caller falls back to the relocated replay.
+            return false;
         }
     }
 
@@ -274,9 +347,12 @@ class TestCase extends BaseTestCase
             $methodsInvoked[] = $methodInvoked;
 
             if ($failure instanceof SkippedTest) {
-                // PHPUnit would mark the test as skipped, but its verdict was already emitted at
-                // the body's first yield; a skip signal from cleanup is dropped rather than
-                // reported as a failure of the run.
+                // Blocking PHPUnit treats a skip signalled from an after-test hook as a test
+                // FAILURE (SkippedWithMessageException is an AssertionFailedError caught by
+                // runBare()'s tearDown-phase handling) -- but this test's verdict was already
+                // emitted at the body's first yield, so the signal is dropped here rather than
+                // reported as a failure of the run. (A joined #[Depends] producer does not take
+                // this path: its hooks run natively, with PHPUnit's own semantics.)
                 continue;
             }
 
