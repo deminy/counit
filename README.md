@@ -351,6 +351,23 @@ faster, with limitations apply. Here is a list of limitations of this package:
 * A related behavior note for projects running with `failOnRisky` enabled: a manual-approach test whose wrapped
   callable throws before its first yield no longer receives the assertion credit, so it may now report "This test did
   not perform any assertions" under _counit_ — which is exactly what plain _PHPUnit_ was already reporting for it.
+* Under _counit_, _PHPUnit_ invokes _tearDown()_ (and _#[After]_ methods) as soon as the test body first yields on a
+  sleep/IO call — potentially while the body is still running (e.g. closing a database connection, or truncating
+  tables the body still uses). There is no way to change when _PHPUnit_ runs them, so _counit_ provides two places for
+  per-test cleanup that is guaranteed to run right after the test body, pass or fail, in both coroutine and blocking
+  mode:
+  * **The automatic approach**: override method _tearDownCoroutine()_ (declared on _Deminy\Counit\TestCase_) instead
+    of _tearDown()_.
+  * **The manual approach** (or inline in any test): register cleanup with _Counit::defer(callable)_ inside the
+    callback passed to _Counit::create()_; deferred callbacks run in reverse registration order.
+
+  A cleanup failure that happens after the test body has yielded is reported at the end of the run and forces a
+  non-zero exit code. _counit_ prints a notice — once per class; silence it with environment variable
+  _COUNIT_SILENCE_TEARDOWN_NOTICE=1_ — when a test class extending _Deminy\Counit\TestCase_ declares _tearDown()_ or
+  _#[After]_ methods. Two caveats: these cleanup hooks run after _PHPUnit_ has already reported the test's result, and
+  cleanup that destroys state **other** tests read (truncating shared tables, flushing caches) is incompatible with
+  concurrent execution no matter where it runs — give each test disjoint state (see _Helper::getNewKey()_) or run that
+  test class under plain _PHPUnit_.
 
 # Local Development
 

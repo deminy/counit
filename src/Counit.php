@@ -43,6 +43,15 @@ class Counit
     public static array $deferredFailures = [];
 
     /**
+     * Cleanup callbacks registered via defer(), keyed by the ID of the coroutine they were
+     * registered in (-1 when not inside a coroutine, e.g. in blocking mode). Each stack is drained
+     * -- in reverse registration order -- by create(), right after the wrapped callable finishes.
+     *
+     * @var array<int, list<callable>>
+     */
+    private static array $deferred = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -84,6 +93,19 @@ class Counit
                     } else {
                         $caught = $e;
                     }
+                } finally {
+                    try {
+                        self::runDeferred(self::currentCoroutineId());
+                    } catch (\Throwable $e) {
+                        // A failing cleanup must not mask a failing body: it is only surfaced as
+                        // the test's own error when the body succeeded synchronously; after a
+                        // yield it is queued under its own key, so both failures get reported.
+                        if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
+                            self::$deferredFailures[$description . ' (deferred cleanup)'] = $e;
+                        } elseif ($caught === null) {
+                            $caught = $e;
+                        }
+                    }
                 }
             });
             $alreadyReturned = true;
@@ -104,8 +126,55 @@ class Counit
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
         }
 
-        $callable();
+        // Blocking mode: run the callable directly; cleanups it registered via defer() run right
+        // after it, preserving the same ordering as coroutine mode. Nested create() calls share
+        // the same (non-)coroutine ID here, so the caller's pending cleanups are set aside first.
+        $cid            = self::currentCoroutineId();
+        $parentDeferred = self::$deferred[$cid] ?? [];
+        unset(self::$deferred[$cid]);
+        $bodyThrew = false;
+
+        try {
+            $callable();
+        } catch (\Throwable $e) {
+            $bodyThrew = true;
+            throw $e;
+        } finally {
+            try {
+                self::runDeferred($cid);
+            } catch (\Throwable $e) {
+                // The body's Throwable takes precedence, the same way PHPUnit itself prioritizes
+                // a test failure over a subsequent tearDown() error.
+                if (!$bodyThrew) {
+                    throw $e;
+                }
+            } finally {
+                if ($parentDeferred !== []) {
+                    self::$deferred[$cid] = $parentDeferred;
+                }
+            }
+        }
+
         return 0;
+    }
+
+    /**
+     * Registers a cleanup callback to run right after the current test body finishes -- pass or
+     * fail -- instead of in tearDown(), which PHPUnit invokes as soon as the test body first
+     * yields on a sleep/IO call (possibly while the body is still running). Deferred callbacks run
+     * in reverse registration order, inside the coroutine (or at the same point in blocking mode).
+     * They only apply within a create() call: for the automatic approach that is the whole test
+     * method; for the manual approach, call defer() inside the callable passed to create(). A
+     * callback registered outside any create() call is never executed.
+     *
+     * A Throwable thrown by a deferred callback after the test body has yielded is reported at the
+     * end of the run and forces exit code 1, like any other deferred failure. When the test body
+     * itself threw, the body's Throwable takes precedence. See also TestCase::tearDownCoroutine()
+     * for the automatic approach's structured equivalent.
+     */
+    public static function defer(callable $cleanup): void
+    {
+        self::$deferred[self::currentCoroutineId()][] = $cleanup;
     }
 
     /**
@@ -135,6 +204,50 @@ class Counit
         if ($count > 0 && $caller instanceof TestCase && !$caller->doesNotPerformAssertions()) {
             $caller->addToAssertionCount($count);
             self::$creditedAssertionCount += $count;
+        }
+    }
+
+    /**
+     * The ID of the coroutine the current code runs in, or -1 when not inside a coroutine (which
+     * includes blocking mode without the Swoole extension loaded at all).
+     */
+    private static function currentCoroutineId(): int
+    {
+        if (!extension_loaded('swoole')) {
+            return -1;
+        }
+
+        // The is_int() check exists for PHPStan only: swoole/ide-helper types getCid() as mixed.
+        $cid = Coroutine::getCid();
+
+        return is_int($cid) ? $cid : -1;
+    }
+
+    /**
+     * Runs (and forgets) the cleanup callbacks registered under the given coroutine ID, in reverse
+     * registration order. Every callback runs even when an earlier one throws -- skipping the rest
+     * would leak the resources they were meant to release -- and the first Throwable is rethrown
+     * afterwards so the failure still surfaces.
+     */
+    private static function runDeferred(int $cid): void
+    {
+        $stack = self::$deferred[$cid] ?? [];
+        unset(self::$deferred[$cid]);
+
+        $firstFailure = null;
+
+        foreach (array_reverse($stack) as $cleanup) {
+            try {
+                $cleanup();
+            } catch (\Throwable $e) {
+                if ($firstFailure === null) {
+                    $firstFailure = $e;
+                }
+            }
+        }
+
+        if ($firstFailure !== null) {
+            throw $firstFailure;
         }
     }
 }

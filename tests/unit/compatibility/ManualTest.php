@@ -86,4 +86,26 @@ class ManualTest extends TestCase
             1 // Requested on purpose: the credit must be declined for this test.
         );
     }
+
+    /**
+     * Counit::defer() registers cleanup that runs right after the wrapped callable finishes --
+     * unlike tearDown(), which PHPUnit invokes at the body's first yield. The delayed assertion
+     * must therefore still observe the resource in its open state.
+     */
+    public function testDefer(): void
+    {
+        $resource        = new \stdClass();
+        $resource->state = 'open';
+
+        Counit::create(
+            function () use ($resource): void {
+                Counit::defer(static function () use ($resource): void {
+                    $resource->state = 'closed';
+                });
+                Counit::sleep(1);
+                self::assertSame('open', $resource->state, 'Deferred cleanup must not run before the body finishes.');
+            },
+            1 // The wrapped function call has one delayed assertion in it.
+        );
+    }
 }

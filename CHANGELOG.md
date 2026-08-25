@@ -9,6 +9,19 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ## Unreleased
 
+### Added
+
+- **`TestCase::tearDownCoroutine()` and `Counit::defer()`: cleanup that observes a finished test body.** Under
+  Swoole, PHPUnit invokes `tearDown()` (and `#[After]` methods) as soon as the test body first yields — potentially
+  while the body is still running — and PHPUnit's final `runBare()` offers no seam to change that.
+  Automatic-approach tests can now override `tearDownCoroutine()`, which runs inside the test's coroutine, strictly
+  after the body, pass or fail (and at the same point in blocking mode, including in the child process of a
+  process-isolated test); any test can register cleanup with `Counit::defer(callable)`, run in reverse registration
+  order right after the wrapped callable — the manual approach's equivalent. A cleanup failure after the body has
+  yielded is reported at the end of the run and forces exit code 1. counit also prints a once-per-class notice when
+  an automatic-approach class declares `tearDown()`/`#[After]` hooks (silence with
+  `COUNIT_SILENCE_TEARDOWN_NOTICE=1`).
+
 ### Bug fixes
 
 - **Support `#[DoesNotPerformAssertions]` and `expectNotToPerformAssertions()` in both approaches.** Every test used
