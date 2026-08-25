@@ -30,6 +30,21 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
   `Counit::defer(callable)`, run in reverse registration order right after the wrapped callable — the manual
   approach's only option, since counit is not in charge of its test lifecycle. A cleanup failure after the body has
   yielded is reported at the end of the run and forces exit code 1.
+- **`#[Depends]` (and its variants) now works with exact PHPUnit semantics in the automatic approach.** A dependent
+  test used to receive `NULL` instead of the producer's return value — unconditionally, even for a producer that
+  never yields, because counit's `invokeTestMethod()` discarded the body's return value — and a producer that failed
+  only after a yield was already recorded as passed, so its dependents ran anyway (the failure surfaced only in the
+  deferred end-of-run block). PHPUnit resolves a dependent's input and skip decision before any seam counit owns, so
+  the only correct fix is on the producer's side: counit now builds the reverse dependency graph up front (from the
+  `TestSuite\Loaded` event, using PHPUnit's own dependency metadata) and *joins* the coroutine of every test
+  something depends on — `invokeTestMethod()` returns the body's real value and rethrows its real failure, so
+  PHPUnit natively records the right result, forwards it (deep/shallow clone variants included, `#[DependsExternal]`
+  across classes, `#[DependsOnClass]` for whole classes), and skips dependents of a failed producer exactly as in
+  blocking mode. Only the joined producer loses its own concurrency — its dependents could never have overlapped
+  with it anyway — while every unrelated test keeps overlapping, including during the wait: a dependency chain runs
+  in its blocking-mode duration, nothing else slows down. The new `Counit::createAndJoin()` offers the same
+  run-to-completion semantics to manual-approach producers. (A producer using a data provider still passes `NULL` —
+  plain PHPUnit refuses to record return values for those; upstream behavior.)
 
 ### Bug fixes
 

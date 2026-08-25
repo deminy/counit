@@ -10,6 +10,8 @@ use PHPUnit\Event\Test\PreparationStarted as TestPreparationStarted;
 use PHPUnit\Event\Test\PreparationStartedSubscriber as TestPreparationStartedSubscriber;
 use PHPUnit\Event\TestRunner\ExecutionFinished;
 use PHPUnit\Event\TestRunner\ExecutionFinishedSubscriber;
+use PHPUnit\Event\TestSuite\Loaded as TestSuiteLoaded;
+use PHPUnit\Event\TestSuite\LoadedSubscriber as TestSuiteLoadedSubscriber;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Runner\Extension\Extension;
 use PHPUnit\Runner\Extension\Facade;
@@ -36,6 +38,16 @@ final class CounitExtension implements Extension
             // so attribution stays off under it and the JUnit per-testcase correction falls back
             // to the credit/late arithmetic in Counit::correctedAssertionCountFor().
             Attribution::$enabled = !filter_var((string) ini_get('swoole.enable_preemptive_scheduler'), FILTER_VALIDATE_BOOL);
+
+            // The reverse #[Depends] graph has to be known before the first producer runs, and
+            // this event carries the whole (already flattened) suite. See DependencyMap.
+            $facade->registerSubscriber(new class implements TestSuiteLoadedSubscriber {
+                #[\Override]
+                public function notify(TestSuiteLoaded $event): void
+                {
+                    DependencyMap::build($event->testSuite());
+                }
+            });
 
             // Fires before setUp()/#[Before] hooks run, so their assertions are attributed to the
             // test too. Also the earliest point the test's class name is known, which is when the

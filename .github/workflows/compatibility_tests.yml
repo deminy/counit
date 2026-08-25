@@ -40,7 +40,7 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (39 tests, 46 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (52 tests, 59 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot change the test's status
@@ -62,6 +62,24 @@ jobs:
           else
             grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
           fi
+
+      - name: Test Depends Failure Semantics
+        # A producer failing only after a yield used to be recorded as passed at that yield: its
+        # failure was deferred to an end-of-run notice and its dependent ran anyway. With the
+        # producer's coroutine joined, the failure lands inside runBare() like in blocking mode:
+        # a real Failure, the dependent Skipped, exit code 1, and no deferred-failure block. The
+        # expected output is identical with and without Swoole. This cannot live in the
+        # exact-summary-gated suite above, since the run is expected to fail.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsFailureTest.php > /tmp/depends-fail.log 2> /tmp/depends-fail.err || rc=$?
+          cat /tmp/depends-fail.log /tmp/depends-fail.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/depends-fail.log
+          # The dependent must not have run (its body fails loudly if it does) ...
+          ! grep -qF 'the dependent of a failed producer must be skipped' /tmp/depends-fail.log
+          # ... and the producer's failure must be a real one, not a deferred end-of-run notice.
+          ! grep -qF 'already been reported as passed' /tmp/depends-fail.err
 
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the

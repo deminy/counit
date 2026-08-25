@@ -337,6 +337,75 @@ class Counit
     }
 
     /**
+     * Runs the callable in its own coroutine and waits for it to finish, returning its return
+     * value and rethrowing whatever it threw -- i.e. the caller observes exactly what a blocking
+     * run would, while the main coroutine still yields for the duration, so every test coroutine
+     * already in flight keeps making progress.
+     *
+     * This is what a test other tests #[Depends] on needs: PHPUnit records a producer's return
+     * value and verdict into PassedTests at the end of runBare(), which under create() happens at
+     * the body's first yield -- too early for either to be real. Joining here moves both back to
+     * where PHPUnit expects them, at the cost of that one test's own concurrency (its dependents
+     * could not have overlapped with it anyway). No assertion credit is involved: the body has
+     * fully run by the time PHPUnit reads the test's count, exactly as in blocking mode.
+     *
+     * @throws \Throwable whatever the callable threw
+     */
+    public static function createAndJoin(callable $callable): mixed
+    {
+        if (!Helper::isCoroutineFriendly()) {
+            return $callable();
+        }
+
+        $trace  = debug_backtrace();
+        $caller = $trace[1]['object'] ?? null;
+        $testId = $caller instanceof TestCase ? $caller->valueObjectForEvents()->id() : null;
+
+        $done   = new Coroutine\Channel(1);
+        $result = null;
+        $thrown = null;
+
+        Coroutine::create(function () use ($callable, $caller, $testId, $done, &$result, &$thrown): void {
+            Attribution::coroutineStarted($testId);
+
+            try {
+                $result = $callable();
+            } catch (\Throwable $e) {
+                $thrown = $e;
+            } finally {
+                try {
+                    self::runDeferred(self::currentCoroutineId());
+                } catch (\Throwable $e) {
+                    // A failing cleanup must not mask a failing body.
+                    if ($thrown === null) {
+                        $thrown = $e;
+                    }
+                }
+
+                if ($caller instanceof TestCase) {
+                    self::recordFinalAssertionCount($caller);
+                }
+
+                Attribution::coroutineFinished();
+                $done->push(true);
+            }
+        });
+
+        // Back on the calling coroutine: it is running again because the child finished or
+        // yielded. Re-claim the assertion counter, then hand it over for the wait.
+        Attribution::resumed();
+        Attribution::suspended();
+        $done->pop();
+        Attribution::resumed();
+
+        if ($thrown !== null) {
+            throw $thrown;
+        }
+
+        return $result;
+    }
+
+    /**
      * Credits the calling test with $count assertions up front, unless it declared -- through
      * #[DoesNotPerformAssertions] or expectNotToPerformAssertions() -- that it performs none, in
      * which case PHPUnit would report the credited test as risky ("This test is not expected to

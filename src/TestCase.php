@@ -108,6 +108,28 @@ class TestCase extends BaseTestCase
             // expectNotToPerformAssertions() -- that it performs no assertions, so such tests are
             // not falsely reported as risky. Applied credits are subtracted again from the run's
             // total by CounitExtension's end-of-run correction.
+            // A test something #[Depends] on cannot be allowed to merely start here: PHPUnit
+            // records its return value and its verdict into PassedTests at the end of runBare()
+            // -- which, with the body still in flight, would be null and "passed" -- and resolves
+            // the dependent's input from there in TestCase::run(), before any counit seam. So a
+            // producer's coroutine is joined before returning: its dependents see the real value,
+            // and a producer that only fails after a yield skips them exactly as in blocking mode.
+            // It costs that one test its own concurrency; every other test still overlaps with it,
+            // including while it waits.
+            if (DependencyMap::isProducer(static::class, $this->name())) {
+                return Counit::createAndJoin(function () use ($methodName, $testArguments): mixed {
+                    try {
+                        return parent::invokeTestMethod($methodName, $testArguments);
+                    } finally {
+                        try {
+                            $this->tearDownCoroutine();
+                        } finally {
+                            $this->invokeRelocatedAfterTestHooks();
+                        }
+                    }
+                });
+            }
+
             Counit::create(function () use ($methodName, $testArguments): void {
                 try {
                     parent::invokeTestMethod($methodName, $testArguments);

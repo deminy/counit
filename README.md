@@ -338,6 +338,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `tearDown()` / `#[After]` hooks | ✅ run after the finished test body (see notes for two caveats) | ✅ (`@after`) |
 | `markTestSkipped()` / `markTestIncomplete()` **before** the first yield | ✅ | ✅ |
 | Process isolation (`#[RunInSeparateProcess]`, `#[RunTestsInSeparateProcesses]`, `--process-isolation`) | ✅ exact semantics — but no speedup, and each isolated test serializes the run | ✅ (annotations) |
+| `#[Depends]` / `#[DependsExternal]` (incl. deep/shallow clone variants) and `#[DependsOnClass]` | ✅ exact semantics — dependents receive the producer's real return value and are skipped when the producer fails, even after a yield. The producer itself (for `#[DependsOnClass]`: every test of the depended-on class) is run to completion before the run moves on, so it gets no speedup of its own — its dependents could not have overlapped with it anyway, and unrelated tests still do | ❌ (`@depends`) — breaks when the producer yields before finishing |
 | Test selection: `--filter`, `--testsuite`, `--group` / `#[Group]`, `--exclude-group` | ✅ | ✅ |
 | `#[Requires*]` preconditions | ✅ | ✅ (`@requires`) |
 | `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
@@ -348,7 +349,6 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 
 | Feature | Counit 1.x | Counit 0.x (reference) |
 |---|---|---|
-| `#[Depends]` (and variants like `#[DependsExternal]`) | ❌ dependent tests receive `NULL` instead of the producer's return value, and "skip dependents on failure" is weakened | ❌ (`@depends`, same class of problem) |
 | Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures | ✅ verified after the finished body |
 | `expectException()` where the throw happens **after** a yield | ❌ the test fails "exception not thrown", and the exception resurfaces as a deferred failure | ❌ |
 | `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
@@ -388,15 +388,23 @@ faster, with limitations apply. Here is a list of limitations of this package:
   there runs in blocking mode. Worse, such a test blocks the entire run for as long as its child process takes, since
   no other coroutine can make progress meanwhile. Mixing a few isolated tests into a suite is fine; running a whole
   suite under `--process-isolation` defeats the purpose of _counit_.
-* Attribute _#[Depends]_ (and its variants like _#[DependsExternal]_) doesn't work reliably in the automatic approach:
-  * When a producer test declares a non-void return type, the dependent test receives _NULL_ instead of the producer's
-    return value: in coroutine mode, _TestCase::invokeTestMethod()_ hands the test body off to a coroutine and returns
-    _NULL_ unconditionally, so _PHPUnit_ never sees (and thus never stores or forwards) the real return value.
-  * Even without return values, the "skip dependents when the dependency fails" guarantee is weakened: a dependency is
-    marked as "passed" by _PHPUnit_ as soon as its coroutine first yields on a time/IO operation, so a dependent test
-    can start (and run to completion) even when the dependency later fails.
-  * More generally, _#[Depends]_ serializes exactly what _counit_ exists to overlap. Tests chained through _#[Depends]_
-    are better kept under plain _PHPUnit_ (or restructured to share fixtures another way) than run through _counit_.
+* Attribute _#[Depends]_ (and its variants) works with exact _PHPUnit_ semantics in the automatic approach. _PHPUnit_
+  records a producer test's return value and verdict at the end of _runBare()_ — which, with the body handed off to a
+  coroutine, would be the body's first yield: too early for either to be real. So when anything in the run depends on
+  a test (_counit_ builds the reverse dependency graph up front, from _PHPUnit_'s own metadata), that test's coroutine
+  is *joined*: _invokeTestMethod()_ only returns once the body has truly finished, returning its real value and
+  rethrowing its real failure. Dependents therefore receive the actual return value (deep/shallow clone variants
+  included) and are skipped when a producer fails — even when the failure happens only after a yield. Notes:
+  * The joined producer gets no concurrency of its own — its dependents could never have overlapped with it anyway —
+    but every unrelated test still overlaps with it, including while it waits. A _#[Depends]_ chain runs in exactly
+    its blocking-mode duration; everything else is unaffected. For _#[DependsOnClass]_, every test of the depended-on
+    class is joined (the class-passed verdict needs all of them finished).
+  * In the manual approach, a producer computing its return value inside _Counit::create()_ still loses it (the
+    callable's result is only available if it finishes before its first yield). Use _Counit::createAndJoin()_ instead
+    for such producers: it runs the callable in a coroutine, waits for it, and returns its value / rethrows its
+    failure — while other tests' coroutines keep running.
+  * A producer with a data provider passes _NULL_ to its dependents — under plain _PHPUnit_ too (it refuses to record
+    return values for data-provider tests); this is upstream behavior, not a _counit_ limitation.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being
