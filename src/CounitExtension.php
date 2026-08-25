@@ -7,13 +7,45 @@ namespace Deminy\Counit;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\TestResult;
 use PHPUnit\Runner\AfterLastTestHook;
+use PHPUnit\Runner\BeforeFirstTestHook;
+use PHPUnit\Runner\BeforeTestHook;
 use Swoole\Coroutine;
 
 /**
  * @internal this class is not covered by the backward compatibility promise for counit
  */
-class CounitExtension implements AfterLastTestHook
+class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeTestHook
 {
+    /**
+     * {@inheritDoc}
+     */
+    public function executeBeforeFirstTest(): void
+    {
+        // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine only
+        // ever switches at a yield. Swoole's preemptive scheduler breaks that premise, so
+        // attribution stays off under it and the JUnit per-testcase correction falls back to the
+        // credit/late arithmetic in Counit::correctedAssertionCountFor().
+        Attribution::$enabled = Helper::isCoroutineFriendly()
+            && !filter_var((string) ini_get('swoole.enable_preemptive_scheduler'), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * Runs from the run's first test onwards, before setUp() and before anything else of that
+     * test's class can execute -- which is when the sleep()/usleep() shims for its namespace have
+     * to be in place. PHPUnit hands hooks the test's description ("Class::method"), and that is
+     * all installShims() needs. (This hook, unlike counit's own TestListener, is registered by
+     * PHPUnit before the run starts, so no test is missed.)
+     */
+    public function executeBeforeTest(string $test): void
+    {
+        $separator = strpos($test, '::');
+        if ($separator !== false) {
+            Attribution::installShims(substr($test, 0, $separator));
+        }
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -29,6 +61,7 @@ class CounitExtension implements AfterLastTestHook
             // Reset the counter so that, after the drain below, it holds exactly the assertions
             // that ran too late for PHPUnit to see.
             Assert::resetCount();
+            Attribution::counterReset();
 
             // When the only coroutine left is the one created in script /counit, it means all the tests are finally
             // done, and it's time to hand it over to PHPUnit to take care of the rest part.
@@ -48,6 +81,15 @@ class CounitExtension implements AfterLastTestHook
             // mock/prophecy verification and the exception-expectation checks -- which run inside
             // the test's coroutine, after PHPUnit read that test's count; see
             // AssertionCountListener.
+            // The JUnit XML report needs its own correction: its per-testcase `assertions`
+            // attributes were read from the test objects as PHPUnit reported them, so they carry
+            // the up-front credits (inflating every automatic-approach test's count, even in
+            // fully synchronous suites), miss the assertions counted on the test object after its
+            // report, and hold whatever the test's counting window happened to catch. The logger
+            // buffers the report and only writes it from flush(), which TestResult::flushListeners()
+            // triggers after this hook has run.
+            JunitXmlCorrector::correct();
+
             $this->correctAssertionCount(
                 Assert::getCount()
                 - Counit::$creditedAssertionCount

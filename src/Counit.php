@@ -69,6 +69,15 @@ class Counit
     public static $deferredSkips = [];
 
     /**
+     * Per test key (spl_object_id() of its TestCase object): the up-front assertion credit
+     * applied to it. The run total only needs the sum ($creditedAssertionCount); the JUnit
+     * per-testcase correction needs to know which test carries which credit.
+     *
+     * @var array<int, int>
+     */
+    private static $appliedCredits = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -113,8 +122,20 @@ class Counit
 
             $caught          = null;
             $alreadyReturned = false;
+            $key             = ($caller instanceof TestCase) ? spl_object_id($caller) : null;
 
-            $id = Coroutine::create(function () use ($callable, &$caught, &$alreadyReturned, $description): void {
+            if ($key !== null) {
+                // Normally a no-op: the run's TestListener already claimed the counter for this
+                // test at startTest(). It matters for the one test whose startTest() fired before
+                // that listener could be registered (it is registered from this very method, on
+                // its first call) -- nothing has yielded yet at that point, so the counter's
+                // whole current value belongs to this test and is claimed retroactively.
+                Attribution::claimMain($key);
+            }
+
+            $id = Coroutine::create(function () use ($callable, $key, &$caught, &$alreadyReturned, $description): void {
+                Attribution::coroutineStarted($key);
+
                 try {
                     $callable();
                 } catch (\Throwable $e) {
@@ -130,9 +151,15 @@ class Counit
                     } else {
                         $caught = $e;
                     }
+                } finally {
+                    Attribution::coroutineFinished();
                 }
             });
             $alreadyReturned = true;
+
+            // The calling coroutine is running again (the child finished or yielded): re-claim
+            // the assertion counter for whichever test it is running.
+            Attribution::resumed();
 
             if ($caught !== null) {
                 throw $caught;
@@ -171,6 +198,9 @@ class Counit
 
         $test->addToAssertionCount($count);
         self::$creditedAssertionCount += $count;
+
+        $key                        = spl_object_id($test);
+        self::$appliedCredits[$key] = (isset(self::$appliedCredits[$key]) ? self::$appliedCredits[$key] : 0) + $count;
     }
 
     /**
@@ -180,9 +210,53 @@ class Counit
     public static function sleep(int $seconds): void
     {
         if (Helper::isCoroutineFriendly()) {
+            Attribution::suspended();
             Coroutine::sleep($seconds);
+            Attribution::resumed();
         } else {
             \sleep($seconds);
         }
+    }
+
+    /**
+     * The assertion count the JUnit XML report should carry for the given test -- what a blocking
+     * run would have reported for it -- or null when counit has nothing better than the number
+     * PHPUnit already wrote.
+     *
+     * PHPUnit's number for a test (`emitted`) is, under counit, the sum of three things: the
+     * up-front credit, the assertions counted directly on the test object before it was reported,
+     * and the static-counter window PHPUnit harvested into it -- a window that, after a yield,
+     * holds whatever other tests happened to run in it. Segment accounting knows the test's real
+     * share of the static counter (Attribution::ownFor()), so the window is replaced wholesale:
+     *
+     *     corrected = own + (emitted - credit - harvested) + late
+     *
+     * where the parenthesised term is what remains of PHPUnit's number once the credit and the
+     * window are taken out -- the instance-counted assertions -- and `late` adds the ones counted
+     * on the test object after it was reported (a mock verified after a yield, an
+     * addToAssertionCount() call from a tearDown() running inside the coroutine).
+     *
+     * Without segment accounting (Swoole's preemptive scheduler is on), the window cannot be
+     * split, so the correction is limited to removing the credit and adding the late counts.
+     *
+     * @return int|null
+     */
+    public static function correctedAssertionCountFor(int $key)
+    {
+        $emitted = AssertionCountListener::emittedCountFor($key);
+        if ($emitted === null) {
+            return null;
+        }
+
+        $credit = isset(self::$appliedCredits[$key]) ? self::$appliedCredits[$key] : 0;
+        $late   = AssertionCountListener::lateCountFor($key);
+
+        if (Attribution::$enabled && Attribution::harvestRecorded($key)) {
+            $instanceOnly = max(0, $emitted - $credit - Attribution::harvestedFor($key)) + $late;
+
+            return max(0, Attribution::ownFor($key) + $instanceOnly);
+        }
+
+        return max(0, $emitted - $credit + $late);
     }
 }

@@ -47,6 +47,21 @@ class AssertionCountListener implements TestListener
     private $countsAtEndOfTest;
 
     /**
+     * Per test key (spl_object_id()): the assertion count PHPUnit reported for that test.
+     *
+     * @var array<int, int>
+     */
+    private $emitted = [];
+
+    /**
+     * Per test key: the test object, kept alive so its spl_object_id() is never recycled and its
+     * final assertion count can be read at the end of the run.
+     *
+     * @var array<int, BaseTestCase>
+     */
+    private $tests = [];
+
+    /**
      * The TestResult objects this listener is already registered on.
      *
      * @var \SplObjectStorage<TestResult, true>
@@ -102,12 +117,70 @@ class AssertionCountListener implements TestListener
     }
 
     /**
+     * The assertion count PHPUnit reported for $test -- the number the JUnit logger wrote into
+     * that test's <testcase> element -- or null when the test was never reported (it ran before
+     * this listener could be registered; see attach()).
+     *
+     * @return int|null
+     */
+    public static function emittedCountFor(int $key)
+    {
+        if (self::$instance === null) {
+            return null;
+        }
+
+        return isset(self::$instance->emitted[$key]) ? self::$instance->emitted[$key] : null;
+    }
+
+    /**
+     * The assertions counted on the test object after PHPUnit had already reported it. Call this
+     * only once the test's coroutine has finished.
+     */
+    public static function lateCountFor(int $key): int
+    {
+        if ((self::$instance === null) || !isset(self::$instance->tests[$key])) {
+            return 0;
+        }
+
+        $test    = self::$instance->tests[$key];
+        $emitted = isset(self::$instance->emitted[$key]) ? self::$instance->emitted[$key] : null;
+
+        if ($emitted === null) {
+            return 0;
+        }
+
+        return max(0, $test->getNumAssertions() - $emitted);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * Fires right after PHPUnit reset its static assertion counter for $test and before the
+     * test's setUp() runs, which is exactly the segment boundary Attribution needs.
+     */
+    public function startTest(Test $test): void
+    {
+        if ($test instanceof BaseTestCase) {
+            Attribution::testStarting(spl_object_id($test));
+        }
+    }
+
+    /**
      * {@inheritDoc}
      */
     public function endTest(Test $test, float $time): void
     {
         if ($test instanceof BaseTestCase) {
+            $key                            = spl_object_id($test);
             $this->countsAtEndOfTest[$test] = $test->getNumAssertions();
+            $this->emitted[$key]            = $test->getNumAssertions();
+            $this->tests[$key]              = $test;
+
+            // Captures the counter window PHPUnit harvested into this test; must run before
+            // anything else can move the counter, hence the notification from here.
+            Attribution::testFinished($key);
+
+            JunitXmlCorrector::recordTest(get_class($test), $test->getName(), $key);
         }
     }
 }

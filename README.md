@@ -166,10 +166,11 @@ class SleepTest extends TestCase
 When customized method _setUpBeforeClass()_ and _tearDownAfterClass()_ are defined in the test cases, please make sure
 to call their parent methods accordingly in these customized methods.
 
-The total # of assertions reported at the end of a run matches _PHPUnit_ exactly. What can still differ is which test
-an individual assertion is attributed to: an assertion performed after a sleep()/IO yield may be counted against
-whichever test happened to be running at that moment, so the per-test counts shown in verbose/TestDox-style output are
-not always exact. See [Additional Notes](#additional-notes).
+The total # of assertions reported at the end of a run matches _PHPUnit_ exactly, and the per-testcase counts in the
+JUnit XML report (`--log-junit`, the only _PHPUnit_ 8/9 output that shows per-test assertion counts) are corrected as
+well — exact whenever counit can observe the test's yields (sleep()/usleep() calls in a namespaced test class, and
+Counit::sleep()). An assertion performed after a yield counit cannot observe (e.g. hooked network IO) goes missing
+from its own test's JUnit count — but is never added to another test's. See [Additional Notes](#additional-notes).
 
 To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.2.x/tests/unit/automatic) (test suite "automatic").
 
@@ -324,7 +325,7 @@ faster, with limitations apply. Here is a list of limitations of this package:
   blocking mode only: _MongoDB_, _Couchbase_, and some ODBC drivers.
 * The package doesn't work exactly the same as when running under _PHPUnit_:
   * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. Because of this, the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
-  * The total # of assertions reported at the end of a run matches _PHPUnit_, but per-test assertion counts (as shown in verbose/TestDox-style output) may be attributed to a different test than the one that performed them.
+  * The total # of assertions reported at the end of a run matches _PHPUnit_, and the per-testcase `assertions` attributes in the JUnit XML report (`--log-junit`, the only _PHPUnit_ 8/9 output that shows per-test assertion counts) are corrected before the report is written: every assertion is attributed to the test that performed it (segment accounting over the coroutine switches counit can observe), so the counts match a blocking run exactly whenever every yield is observable. A yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()` call, a test class in the global namespace) leaves that test's own count too low — never another test's too high. Internally, an assertion performed after a yield still lands in whichever test's counting window _PHPUnit_ happens to have open; only the XML report is corrected.
   * Some exceptions/errors are not handled/reported the same.
 * Annotation _@doesNotPerformAssertions_ and method _expectNotToPerformAssertions()_ (when called in _setUp()_ or at
   the top of the test body) are supported in both approaches: such tests report clean with zero assertions, same as
@@ -334,7 +335,8 @@ faster, with limitations apply. Here is a list of limitations of this package:
     flagged risky under _counit_, while _PHPUnit_ flags it. Run totals stay exact either way, and a *failing* late
     assertion still fails the run.
   * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
-    risky occasionally — the per-test attribution caveat above.
+    risky occasionally — the internal counting-window effect above (the corrected JUnit report is not affected by
+    it).
   * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
     method-level annotation is honored), with or without _counit_.
 * The timing of _tearDown()_ differs between the two approaches:

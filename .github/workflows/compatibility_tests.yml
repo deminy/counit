@@ -65,3 +65,81 @@ jobs:
           else
             grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
           fi
+
+      - name: Test JUnit XML Assertion Counts
+        # The JUnit report's per-testcase `assertions` attributes are read from each test object as
+        # PHPUnit reports it, so under Swoole they used to carry the up-front assertion credit (one
+        # extra per automatic-approach test, even with no yield anywhere), miss assertions counted
+        # on the test object after a yield, and attribute post-yield assertions to whatever test
+        # happened to be counting. counit now corrects the report before it is written (segment
+        # accounting); the expected values are identical with and without Swoole. The third run
+        # covers a test skipped from setUp(): its element keeps assertions="0" and its siblings'
+        # counts must not shift onto the wrong elements.
+        run: |
+          set -o pipefail
+          cat > /tmp/check-junit.php <<'PHP'
+          <?php
+          [, $file, $suiteTotal] = $argv;
+          $expected = json_decode(stream_get_contents(STDIN), true);
+          $xml      = simplexml_load_file($file);
+          foreach ($xml->xpath("//testcase") as $testCase) {
+              $name = (string) $testCase["name"];
+              if ((string) $testCase["assertions"] !== ($expected[$name] ?? null)) {
+                  fwrite(STDERR, "unexpected assertions for {$name}: {$testCase["assertions"]}\n");
+                  exit(1);
+              }
+              unset($expected[$name]);
+          }
+          if ($expected !== []) {
+              fwrite(STDERR, "missing testcases: " . implode(", ", array_keys($expected)) . "\n");
+              exit(1);
+          }
+          // Every testsuite aggregate (nested ones included, e.g. per data provider) must equal
+          // the sum of its descendant testcases, and the top-level total must be the expected one.
+          foreach ($xml->xpath("//testsuite") as $testSuite) {
+              $sum = 0;
+              foreach ($testSuite->xpath(".//testcase") as $testCase) {
+                  $sum += (int) $testCase["assertions"];
+              }
+              if ((int) $testSuite["assertions"] !== $sum) {
+                  fwrite(STDERR, "suite {$testSuite["name"]}: aggregate {$testSuite["assertions"]} != sum {$sum}\n");
+                  exit(1);
+              }
+          }
+          foreach ($xml->xpath("/testsuites/testsuite") as $testSuite) {
+              if ((string) $testSuite["assertions"] !== $suiteTotal) {
+                  fwrite(STDERR, "unexpected top-level suite total: {$testSuite["assertions"]}\n");
+                  exit(1);
+              }
+          }
+          PHP
+          ./counit -c phpunit.xml.dist --log-junit /tmp/junit-count.xml tests/regression/JunitCountTest.php | tee /tmp/junit-count.log
+          grep -qF 'OK (6 tests, 10 assertions)' /tmp/junit-count.log
+          php /tmp/check-junit.php /tmp/junit-count.xml 10 <<'JSON'
+          {
+              "testOneImmediateAssertion": "1",
+              "testTwoImmediateAssertions": "2",
+              "testLateCountsAfterYield": "3",
+              "testAssertsOnlyAfterYield": "1",
+              "testEachDataSetCountsSeparately with data set #0": "1",
+              "testEachDataSetCountsSeparately with data set #1": "2"
+          }
+          JSON
+          ./counit -c phpunit.xml.dist --log-junit /tmp/junit-manual.xml tests/regression/JunitCountManualTest.php | tee /tmp/junit-manual.log
+          grep -qF 'OK (3 tests, 8 assertions)' /tmp/junit-manual.log
+          php /tmp/check-junit.php /tmp/junit-manual.xml 8 <<'JSON'
+          {
+              "testImmediateBeforeAndAfterTheCoroutine": "4",
+              "testOnlyInsideTheCoroutine": "2",
+              "testFullySynchronousCoroutine": "2"
+          }
+          JSON
+          ./counit -c phpunit.xml.dist --log-junit /tmp/junit-skip.xml tests/regression/JunitSkipTest.php | tee /tmp/junit-skip.log
+          grep -qF 'Tests: 3, Assertions: 4, Skipped: 1.' /tmp/junit-skip.log
+          php /tmp/check-junit.php /tmp/junit-skip.xml 4 <<'JSON'
+          {
+              "testBeforeTheSkippedOne": "1",
+              "testSkippedFromSetUp": "0",
+              "testAfterTheSkippedOne": "3"
+          }
+          JSON
