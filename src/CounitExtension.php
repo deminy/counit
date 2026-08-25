@@ -77,7 +77,11 @@ class CounitExtension implements AfterLastTestHook
 
         try {
             $listeners = new \ReflectionProperty(TestResult::class, 'listeners');
-            $listeners->setAccessible(true);
+            if (PHP_VERSION_ID < 80100) {
+                // A no-op since PHP 8.1 (and deprecated since 8.5), but required on the PHP 7.2
+                // through 8.0 part of this branch's supported range.
+                $listeners->setAccessible(true);
+            }
             $value = $listeners->getValue(Counit::$testResult);
 
             if (!is_array($value)) {
@@ -95,7 +99,10 @@ class CounitExtension implements AfterLastTestHook
                 }
 
                 $property = $reflection->getProperty('numAssertions');
-                $property->setAccessible(true);
+                if (PHP_VERSION_ID < 80100) {
+                    // Same as above: only needed on PHP < 8.1.
+                    $property->setAccessible(true);
+                }
                 $total = $property->getValue($listener);
 
                 if (is_int($total)) {
