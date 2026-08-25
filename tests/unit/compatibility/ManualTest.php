@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
  * @internal
  * @coversNothing
  */
-class CaseByCaseTest extends TestCase
+class ManualTest extends TestCase
 {
     /**
      * Trigger an immediate assertion and see if warning message "This test did not perform any assertions" is suppressed properly.

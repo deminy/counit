@@ -9,7 +9,7 @@ use Deminy\Counit\Helper;
 use PHPUnit\Framework\TestCase;
 
 /**
- * To test and check compatibility with PHPUnit's process isolation, in the "case-by-case style".
+ * To test and check compatibility with PHPUnit's process isolation, in the manual approach.
  * The class-level @runTestsInSeparateProcesses annotation is covered here; it isolates every test
  * method of the class, the same way @runInSeparateProcess isolates a single one.
  *
@@ -22,7 +22,7 @@ use PHPUnit\Framework\TestCase;
  *
  * @runTestsInSeparateProcesses
  */
-class ProcessIsolationCaseByCaseTest extends TestCase
+class ProcessIsolationManualTest extends TestCase
 {
     /**
      * The child process runs outside any coroutine, so counit falls back to blocking mode there.

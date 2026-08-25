@@ -13,7 +13,7 @@ use Exception;
  * @internal
  * @coversNothing
  */
-class GlobalTest extends TestCase
+class AutomaticTest extends TestCase
 {
     /**
      * Trigger an immediate assertion and see if warning message "This test did not perform any assertions" is suppressed properly.

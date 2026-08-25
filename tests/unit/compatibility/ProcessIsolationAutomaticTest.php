@@ -8,7 +8,7 @@ use Deminy\Counit\Helper;
 use Deminy\Counit\TestCase;
 
 /**
- * To test and check compatibility with PHPUnit's process isolation, in the "global style".
+ * To test and check compatibility with PHPUnit's process isolation, in the automatic approach.
  *
  * A test annotated with @runInSeparateProcess never reaches counit's TestCase::runBare(): PHPUnit
  * runs it in a child process instead and imports the child's result (including its assertion count)
@@ -19,7 +19,7 @@ use Deminy\Counit\TestCase;
  * @internal
  * @coversNothing
  */
-class ProcessIsolationGlobalTest extends TestCase
+class ProcessIsolationAutomaticTest extends TestCase
 {
     /**
      * The child process runs outside any coroutine, so counit falls back to blocking mode there.

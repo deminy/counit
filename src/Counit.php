@@ -14,8 +14,8 @@ class Counit
 {
     /**
      * Sum of all assertion counts credited to tests up front via creditAssertionCount(): the
-     * explicit $count values passed by "case-by-case" style tests, plus the single credit
-     * TestCase::runBare() records for every "global style" test. These credits stand in for
+     * explicit $count values passed by manual-approach tests, plus the single credit
+     * TestCase::runBare() records for every automatic-approach test. These credits stand in for
      * assertions that will only run later inside a coroutine -- but those assertions ALSO increment
      * PHPUnit's static assertion counter when they eventually run, so they either get harvested
      * into whatever test happens to be current at that moment (double-counting them) or, after the

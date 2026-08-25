@@ -43,7 +43,7 @@ class CounitExtension implements AfterLastTestHook
             // an up-front credit), or -- having run after the last window closed -- in the counter
             // residue drained above. Therefore:
             //     true total = reported total - up-front credits + residue
-            // which holds for both the "global" and the "case-by-case" style.
+            // which holds for both the automatic and the manual approach.
             $this->correctAssertionCount(Assert::getCount() - Counit::$creditedAssertionCount);
         }
     }
