@@ -33,6 +33,14 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ### Bug fixes
 
+- **Stop failing the run for a skip/incomplete signalled after the test's first yield.** A `markTestSkipped()` or
+  `markTestIncomplete()` call made after the test's coroutine had already yielded was queued as a deferred *failure*:
+  the run printed it in the failure block and exited 1, even though plain PHPUnit exits 0 for skipped/incomplete
+  tests. The test's status itself cannot be restored — PHPUnit reported the test as passed at its first yield — but a
+  skip must not fail the run. Such Throwables (anything implementing PHPUnit's `SkippedTest`/`IncompleteTest`
+  interfaces) are now collected separately and printed as an end-of-run notice, without touching the exit code. A
+  skip requested before the first yield keeps working exactly as under PHPUnit.
+
 - **Stop losing assertions counted directly on the test object after its first yield.** PHPUnit counts most
   assertions through `Assert`'s static counter, which counit's credit+residue correction reconciles exactly — but an
   `addToAssertionCount()` call writes to the test object directly, bypassing that counter. Made from code that runs

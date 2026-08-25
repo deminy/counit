@@ -128,6 +128,18 @@ if (extension_loaded('swoole')) {
         $code = 1;
     }
 
+    // A markTestSkipped()/markTestIncomplete() call made after the test's first yield cannot
+    // change the test's status anymore -- PHPUnit already reported the test as passed -- and,
+    // unlike a late failure, must not fail the run: plain PHPUnit exits 0 for skipped/incomplete
+    // tests. Make the divergence visible instead of silent.
+    if (Deminy\Counit\Counit::$deferredSkips !== []) {
+        fwrite(STDERR, PHP_EOL . 'The following tests were marked skipped/incomplete only after they had already been reported' . PHP_EOL . 'as passed (the call happened after a sleep()/IO yield point); their status remains "passed":' . PHP_EOL . PHP_EOL);
+        foreach (Deminy\Counit\Counit::$deferredSkips as $testDescription => $throwable) {
+            fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
+        }
+        fwrite(STDERR, PHP_EOL);
+    }
+
     exit($code);
 }
 
