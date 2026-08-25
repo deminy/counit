@@ -9,7 +9,7 @@ use Deminy\Counit\TestCase;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 
 /**
- * To test and check compatibility with PHPUnit's process isolation, in the "global style".
+ * To test and check compatibility with PHPUnit's process isolation, in the automatic approach.
  *
  * A test marked #[RunInSeparateProcess] never reaches counit's TestCase::invokeTestMethod(): PHPUnit
  * hands it to SeparateProcessTestRunner instead, which runs it in a child process and imports the
@@ -20,7 +20,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
  * @internal
  * @coversNothing
  */
-class ProcessIsolationGlobalTest extends TestCase
+class ProcessIsolationAutomaticTest extends TestCase
 {
     /**
      * The child process runs outside any coroutine, so counit falls back to blocking mode there.

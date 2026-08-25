@@ -4,11 +4,11 @@
          backupGlobals="false"
          bootstrap="tests/bootstrap.php">
     <testsuites>
-        <testsuite name="global">
-            <directory suffix="Test.php">tests/unit/global</directory>
+        <testsuite name="automatic">
+            <directory suffix="Test.php">tests/unit/automatic</directory>
         </testsuite>
-        <testsuite name="case-by-case">
-            <directory suffix="Test.php">tests/unit/case-by-case</directory>
+        <testsuite name="manual">
+            <directory suffix="Test.php">tests/unit/manual</directory>
         </testsuite>
         <!-- Test suite "compatibility" is to test and check compatibility with PHPUnit. -->
         <testsuite name="compatibility">

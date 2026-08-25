@@ -7,6 +7,17 @@ each change.
 Two release series are maintained in parallel: the **1.0.x** series targets PHPUnit ~12.5.24 / ~13.0, while the
 **0.2.x** series is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v` prefix.
 
+## Unreleased
+
+### Changes
+
+- **Renamed the two test-adaptation approaches**: the "global" style is now the **automatic approach**, and the
+  "case by case" style is now the **manual approach**. The test suites and sample directories were renamed to match
+  (`--testsuite global` → `--testsuite automatic`, `--testsuite case-by-case` → `--testsuite manual`;
+  `tests/unit/global/` → `tests/unit/automatic/`, `tests/unit/case-by-case/` → `tests/unit/manual/`). No PHP API
+  changed — `Deminy\Counit\TestCase`, `Counit::create()`, and `Counit::sleep()` all keep their names, so no changes
+  are needed in consumer projects.
+
 ## 1.0.2 - 2026-07-27
 
 Bug-fix release for the 1.0.x series. The supported PHPUnit and PHP versions are unchanged (~12.5.24 on PHP >= 8.3,

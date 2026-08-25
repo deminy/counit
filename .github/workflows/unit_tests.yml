@@ -33,17 +33,17 @@ jobs:
           set -ex
 
           # Run tests using PHPUnit (Swoole is disabled).
-          docker compose exec -T php ./vendor/bin/phpunit --testsuite global
-          docker compose exec -T php ./vendor/bin/phpunit --testsuite case-by-case
+          docker compose exec -T php ./vendor/bin/phpunit --testsuite automatic
+          docker compose exec -T php ./vendor/bin/phpunit --testsuite manual
 
           # Run tests using PHPUnit, with Swoole enabled.
-          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite global
-          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite case-by-case
+          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite automatic
+          docker compose exec -T swoole ./vendor/bin/phpunit --testsuite manual
 
           # Run tests using counit (Swoole is disabled).
-          docker compose exec -T php ./counit --testsuite global
-          docker compose exec -T php ./counit --testsuite case-by-case
+          docker compose exec -T php ./counit --testsuite automatic
+          docker compose exec -T php ./counit --testsuite manual
 
           # Run tests using counit, with Swoole enabled.
-          docker compose exec -T swoole ./counit --testsuite global
-          docker compose exec -T swoole ./counit --testsuite case-by-case
+          docker compose exec -T swoole ./counit --testsuite automatic
+          docker compose exec -T swoole ./counit --testsuite manual

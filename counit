@@ -110,8 +110,8 @@ if (extension_loaded('swoole')) {
         Swoole\Timer::clearAll();
     });
 
-    // Counit::create() (used directly by "case-by-case" style tests, and by
-    // Deminy\Counit\TestCase::invokeTestMethod() for "global style" tests) wraps a callable in a
+    // Counit::create() (used directly by manual-approach tests, and by
+    // Deminy\Counit\TestCase::invokeTestMethod() for automatic-approach tests) wraps a callable in a
     // coroutine so other tests can run concurrently while it's sleeping/waiting on IO. If that
     // coroutine's assertion/exception happens *after* it had already yielded once (e.g. after a
     // sleep() call), create() had already returned to its caller by then, so PHPUnit reported the

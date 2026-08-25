@@ -15,8 +15,8 @@ Table of Contents
 * [Use "counit" in Your Project](#use-counit-in-your-project)
 * [Examples](#examples)
    * [Setup Test Environment](#setup-test-environment)
-   * [The "global" Style](#the-global-style-recommended)
-   * [The "case by case" Style](#the-case-by-case-style)
+   * [The Automatic Approach](#the-automatic-approach-recommended)
+   * [The Manual Approach](#the-manual-approach)
    * [Comparisons](#comparisons)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
@@ -101,9 +101,9 @@ Please pick the _counit_ version matching the version of _PHPUnit_ used in your 
 
 # Use "counit" in Your Project
 
-* Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests in one of the following two styles (details will be discussed in the next sections):
-  * **The global style (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/master/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class.
-  * **The case-by-case style**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/master/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/master/src/Counit.php) instead of the PHP function _sleep()_.
+* Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests using one of the following two approaches (details will be discussed in the next sections):
+  * **The automatic approach (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/master/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class; every test method is then wrapped in a coroutine automatically.
+  * **The manual approach**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/master/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/master/src/Counit.php) instead of the PHP function _sleep()_.
 * Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
 * Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
 * Optional steps:
@@ -111,7 +111,7 @@ Please pick the _counit_ version matching the version of _PHPUnit_ used in your 
 
 # Examples
 
-Folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) and [./tests/unit/case-by-case](https://github.com/deminy/counit/tree/master/tests/unit/case-by-case) contain some sample tests, where we
+Folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/master/tests/unit/automatic) and [./tests/unit/manual](https://github.com/deminy/counit/tree/master/tests/unit/manual) contain some sample tests, where we
 have following time-related tests included:
 
 * Test slow HTTP requests.
@@ -133,16 +133,17 @@ server. The PHP container doesn't have the Swoole extension installed, while the
 
 As said previously, test cases can be written in the same way as those for _PHPUnit_. However, to run time/IO related
 tests faster with _counit_, we need to make some adjustments when writing those test cases; these adjustments can be
-made in two different styles.
+made using two different approaches.
 
-## The "global" Style (recommended)
+<a id="the-global-style-recommended"></a>
+## The Automatic Approach (recommended)
 
-In this style, each test case runs in a separate coroutine automatically.
+In this approach (previously called _the "global" style_), each test case runs in a separate coroutine automatically.
 
-For test cases written in this style, the only change to make on your existing test cases is to use class
+For test cases written using this approach, the only change to make on your existing test cases is to use class
 _Deminy\Counit\TestCase_ instead of _PHPUnit\Framework\TestCase_ as the base class.
 
-A typical test case of the global style looks like this:
+A typical test case of the automatic approach looks like this:
 
 ```php
 use Deminy\Counit\TestCase; // Here is the only change made for counit, comparing to test cases for PHPUnit.
@@ -168,20 +169,21 @@ an individual assertion is attributed to: an assertion performed after a sleep()
 whichever test happened to be running at that moment, so the per-test counts shown in verbose/TestDox-style output are
 not always exact. See [Additional Notes](#additional-notes).
 
-To find more tests written in this style, please check tests under folder [./tests/unit/global](https://github.com/deminy/counit/tree/master/tests/unit/global) (test suite "global").
+To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/master/tests/unit/automatic) (test suite "automatic").
 
-## The "case by case" Style
+<a id="the-case-by-case-style"></a>
+## The Manual Approach
 
-In this style, you make changes directly on a test case to make it work asynchronously. 
+In this approach (previously called _the "case by case" style_), you make changes directly on a test case to make it work asynchronously.
 
-For test cases written in this style, we need to use class _Deminy\Counit\Counit_ accordingly in the test cases where
+For test cases written using this approach, we need to use class _Deminy\Counit\Counit_ accordingly in the test cases where
 we need to wait for PHP execution or to perform IO operations. Typically, following method calls will be used:
 
 * Use method _Deminy\Counit\Counit::create()_ to wrap the test case.
 * Use method _Deminy\Counit\Counit::sleep()_ instead of the PHP function _sleep()_ to wait for PHP execution. You will
   need some knowledge on Swoole if you want to make other IO related tests run asynchronously.
 
-A typical test case of the case-by-case style looks like this:
+A typical test case of the manual approach looks like this:
 
 ```php
 use Deminy\Counit\Counit;
@@ -227,7 +229,7 @@ class SleepTest extends TestCase
 }
 ```
 
-To find more tests written in this style, please check tests under folder [./tests/unit/case-by-case](https://github.com/deminy/counit/tree/master/tests/unit/case-by-case) (test suite "case-by-case").
+To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/master/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
 
@@ -236,35 +238,35 @@ Here we will run the tests under different environments, with or without Swoole.
 `#1` Run the test suites using _PHPUnit_:
 
 ```bash
-# To run test suite "global":
-docker compose exec -ti php    ./vendor/bin/phpunit --testsuite global
+# To run test suite "automatic":
+docker compose exec -ti php    ./vendor/bin/phpunit --testsuite automatic
 # or,
-docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite global
+docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite automatic
 
-# To run test suite "case-by-case":
-docker compose exec -ti php    ./vendor/bin/phpunit --testsuite case-by-case
+# To run test suite "manual":
+docker compose exec -ti php    ./vendor/bin/phpunit --testsuite manual
 # or,
-docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite case-by-case
+docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite manual
 ```
 
 `#2` Run the test suites using _counit_ (without Swoole):
 
 ```bash
-# To run test suite "global":
-docker compose exec -ti php    ./counit --testsuite global
+# To run test suite "automatic":
+docker compose exec -ti php    ./counit --testsuite automatic
 
-# To run test suite "case-by-case":
-docker compose exec -ti php    ./counit --testsuite case-by-case
+# To run test suite "manual":
+docker compose exec -ti php    ./counit --testsuite manual
 ```
 
 `#3` Run the test suites using _counit_  (with extension Swoole enabled):
 
 ```bash
-# To run test suite "global":
-docker compose exec -ti swoole ./counit --testsuite global
+# To run test suite "automatic":
+docker compose exec -ti swoole ./counit --testsuite automatic
 
-# To run test suite "case-by-case":
-docker compose exec -ti swoole ./counit --testsuite case-by-case
+# To run test suite "manual":
+docker compose exec -ti swoole ./counit --testsuite manual
 ```
 
 The first two sets of commands take about same amount of time to finish. The last set of commands uses _counit_ and runs
@@ -273,29 +275,29 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
 <table>
   <tr>
     <th>&nbsp;</th>
-    <th>Style</th>
+    <th>Approach</th>
     <th># of Tests</th>
     <th># of Assertions</th>
     <th>Time to Finish</th>
   </tr>
   <tr>
     <td rowspan="2"><strong>counit (without Swoole), or PHPUnit</strong></td>
-    <td>global</td>
+    <td>automatic</td>
     <td rowspan="4">16</td>
     <td rowspan="4">24</td>
     <td>48 seconds</td>
   </tr>
   <tr>
-    <td>case by case</td>
+    <td>manual</td>
     <td>48 seconds</td>
   </tr>
   <tr>
     <td rowspan="2"><strong>counit (with Swoole enabled)</strong></td>
-    <td>global</td>
+    <td>automatic</td>
     <td>7 seconds</td>
   </tr>
   <tr>
-    <td>case by case</td>
+    <td>manual</td>
     <td>7 seconds</td>
   </tr>
 </table>
@@ -324,6 +326,15 @@ faster, with limitations apply. Here is a list of limitations of this package:
   there runs in blocking mode. Worse, such a test blocks the entire run for as long as its child process takes, since
   no other coroutine can make progress meanwhile. Mixing a few isolated tests into a suite is fine; running a whole
   suite under `--process-isolation` defeats the purpose of _counit_.
+* Attribute _#[Depends]_ (and its variants like _#[DependsExternal]_) doesn't work reliably in the automatic approach:
+  * When a producer test declares a non-void return type, the dependent test receives _NULL_ instead of the producer's
+    return value: in coroutine mode, _TestCase::invokeTestMethod()_ hands the test body off to a coroutine and returns
+    _NULL_ unconditionally, so _PHPUnit_ never sees (and thus never stores or forwards) the real return value.
+  * Even without return values, the "skip dependents when the dependency fails" guarantee is weakened: a dependency is
+    marked as "passed" by _PHPUnit_ as soon as its coroutine first yields on a time/IO operation, so a dependent test
+    can start (and run to completion) even when the dependency later fails.
+  * More generally, _#[Depends]_ serializes exactly what _counit_ exists to overlap. Tests chained through _#[Depends]_
+    are better kept under plain _PHPUnit_ (or restructured to share fixtures another way) than run through _counit_.
 
 # Local Development
 
@@ -345,8 +356,11 @@ In the PHP ecosystem, there are other options to run unit tests in parallel, mos
 # TODOs
 
 * Better integration with _PHPUnit_.
-  * Deal with attribute _#[DoesNotPerformAssertions]_ in the global style.
+  * Deal with attribute _#[DoesNotPerformAssertions]_ in the automatic approach.
   * Make per-test # of assertions (not just the run total) consistent with the one reported from _PHPUnit_.
+  * Support attribute _#[Depends]_ in the automatic approach: pass producer tests' real return values through to dependent
+    tests (currently _NULL_ — see [Additional Notes](#additional-notes)), and only run dependents once their
+    dependencies have actually finished (not just yielded). Until then, the limitation is documented above.
 * Better error/exception handling.
 
 # License

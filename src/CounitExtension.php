@@ -54,7 +54,7 @@ final class CounitExtension implements Extension
                     // total, possibly double-counting an up-front credit), or -- having run after
                     // the last window closed -- in the counter residue drained above. Therefore:
                     //     true total = reported total - up-front credits + residue
-                    // which holds for both the "global" and the "case-by-case" style. The summary
+                    // which holds for both the automatic and the manual approach. The summary
                     // is printed from the collector only after this event completes, so adjusting
                     // the collector here makes the reported total match a blocking (non-Swoole)
                     // run exactly. The collector has no public mutator (it is fed by events that
