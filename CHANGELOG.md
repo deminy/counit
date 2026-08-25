@@ -11,16 +11,25 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
 
 ### Added
 
-- **`TestCase::tearDownCoroutine()` and `Counit::defer()`: cleanup that observes a finished test body.** Under
-  Swoole, PHPUnit invokes `tearDown()` (and `#[After]` methods) as soon as the test body first yields — potentially
-  while the body is still running — and PHPUnit's final `runBare()` offers no seam to change that.
-  Automatic-approach tests can now override `tearDownCoroutine()`, which runs inside the test's coroutine, strictly
-  after the body, pass or fail (and at the same point in blocking mode, including in the child process of a
-  process-isolated test); any test can register cleanup with `Counit::defer(callable)`, run in reverse registration
-  order right after the wrapped callable — the manual approach's equivalent. A cleanup failure after the body has
-  yielded is reported at the end of the run and forces exit code 1. counit also prints a once-per-class notice when
-  an automatic-approach class declares `tearDown()`/`#[After]` hooks (silence with
-  `COUNIT_SILENCE_TEARDOWN_NOTICE=1`).
+- **`tearDown()` and `#[After]` methods now observe a finished test body in the automatic approach.** Under Swoole,
+  PHPUnit used to invoke the after-test hooks as soon as the test body first yielded — potentially while the body was
+  still running, so a `tearDown()` closing a connection or truncating tables could sabotage its own test. PHPUnit's
+  final `runBare()` offers no seam for this phase, so counit now takes the hooks over: it suppresses PHPUnit's own
+  invocation (through PHPUnit's cached hook collections) and runs the same hooks, in the same order, with the same
+  `afterTestMethod*` events, inside the test's coroutine right after the body, pass or fail. Existing test suites
+  need no changes. Differences that remain: the hooks run after PHPUnit has already reported the test's result, and a
+  throwing `tearDown()` is reported in the failure block after the summary with exit code 1 instead of marking its
+  test errored — deliberately so, since rethrowing it into the test-body path would let PHPUnit match it against the
+  test's `expectException()` expectation and falsely pass the test. Should a future PHPUnit release change the
+  internals involved, counit leaves PHPUnit's own (too early) hook timing untouched and prints a once-per-class
+  notice (silence with `COUNIT_SILENCE_TEARDOWN_NOTICE=1`) — loud degradation, never silent.
+- **`TestCase::tearDownCoroutine()` and `Counit::defer()`: additional cleanup homes that observe a finished test
+  body.** Automatic-approach tests can override `tearDownCoroutine()`, which runs inside the test's coroutine,
+  strictly after the body, pass or fail, before the relocated `tearDown()`/`#[After]` hooks (and at the same point in
+  blocking mode, including in the child process of a process-isolated test); any test can register cleanup with
+  `Counit::defer(callable)`, run in reverse registration order right after the wrapped callable — the manual
+  approach's only option, since counit is not in charge of its test lifecycle. A cleanup failure after the body has
+  yielded is reported at the end of the run and forces exit code 1.
 
 ### Bug fixes
 

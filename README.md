@@ -351,23 +351,29 @@ faster, with limitations apply. Here is a list of limitations of this package:
 * A related behavior note for projects running with `failOnRisky` enabled: a manual-approach test whose wrapped
   callable throws before its first yield no longer receives the assertion credit, so it may now report "This test did
   not perform any assertions" under _counit_ — which is exactly what plain _PHPUnit_ was already reporting for it.
-* Under _counit_, _PHPUnit_ invokes _tearDown()_ (and _#[After]_ methods) as soon as the test body first yields on a
-  sleep/IO call — potentially while the body is still running (e.g. closing a database connection, or truncating
-  tables the body still uses). There is no way to change when _PHPUnit_ runs them, so _counit_ provides two places for
-  per-test cleanup that is guaranteed to run right after the test body, pass or fail, in both coroutine and blocking
-  mode:
-  * **The automatic approach**: override method _tearDownCoroutine()_ (declared on _Deminy\Counit\TestCase_) instead
-    of _tearDown()_.
-  * **The manual approach** (or inline in any test): register cleanup with _Counit::defer(callable)_ inside the
-    callback passed to _Counit::create()_; deferred callbacks run in reverse registration order.
+* In the **automatic approach**, _counit_ takes the after-test hooks — _tearDown()_ and _#[After]_ methods — over from
+  _PHPUnit_ and runs them inside the test's coroutine, right after the test body finishes, pass or fail. _tearDown()_
+  therefore observes a finished test body, exactly as under plain _PHPUnit_ — closing a database connection or
+  truncating tables there can no longer sabotage its own still-running test. Two differences from plain _PHPUnit_
+  remain, both a consequence of _counit_ reporting a test as soon as its body first yields:
+  * The hooks run **after** _PHPUnit_ has already reported the test's result. Ordering relative to the test body is
+    preserved; ordering relative to the run's output is not.
+  * A _tearDown()_ that throws cannot mark its own test as errored. _counit_ reports it in the failure block printed
+    after the summary and exits with a non-zero code — as always, **the exit code of _counit_ is the authoritative
+    pass/fail signal**.
 
-  A cleanup failure that happens after the test body has yielded is reported at the end of the run and forces a
-  non-zero exit code. _counit_ prints a notice — once per class; silence it with environment variable
-  _COUNIT_SILENCE_TEARDOWN_NOTICE=1_ — when a test class extending _Deminy\Counit\TestCase_ declares _tearDown()_ or
-  _#[After]_ methods. Two caveats: these cleanup hooks run after _PHPUnit_ has already reported the test's result, and
-  cleanup that destroys state **other** tests read (truncating shared tables, flushing caches) is incompatible with
-  concurrent execution no matter where it runs — give each test disjoint state (see _Helper::getNewKey()_) or run that
-  test class under plain _PHPUnit_.
+  The takeover reaches into _PHPUnit_ internals; should a future _PHPUnit_ release change them, _counit_ leaves
+  _PHPUnit_'s own (too early) hook timing untouched and prints a notice — once per class; silence it with environment
+  variable _COUNIT_SILENCE_TEARDOWN_NOTICE=1_ — so the degradation is loud, never silent.
+* In the **manual approach**, _counit_ is not in charge of the test lifecycle, so _tearDown()_ still runs at the
+  body's first yield. Register cleanup with _Counit::defer(callable)_ inside the callback passed to
+  _Counit::create()_ instead; deferred callbacks run inside the coroutine, in reverse registration order, once the
+  body finishes — and at the same point in blocking mode. The automatic approach additionally offers the
+  _tearDownCoroutine()_ hook (declared on _Deminy\Counit\TestCase_), which runs right after the test body, before the
+  relocated _tearDown()_/_#[After]_ hooks and before deferred callbacks.
+* Cleanup that destroys state **other** tests read (truncating shared tables, flushing caches) is incompatible with
+  concurrent execution no matter where it runs — give each test disjoint state (see _Helper::getNewKey()_) or run
+  that test class under plain _PHPUnit_.
 
 # Local Development
 
