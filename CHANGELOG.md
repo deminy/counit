@@ -90,6 +90,25 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
   affected on this branch — it runs before the test is reported and is counted exactly (new compatibility tests pin
   that down for both approaches); a mock satisfied only after a yield remains a documented limitation.
 
+- **Stop losing `tearDown()`/`#[After]` hooks for a test whose `setUp()` throws or skips.** The relocated hooks only
+  replay inside a test's coroutine, but a test aborted during preparation — `setUp()` or another before-test hook
+  threw or skipped — never starts one, so with the native invocation suppressed its after-test hooks simply never
+  ran (blocking PHPUnit runs them: a failed `setUp()` does not cancel `tearDown()`). counit now detects the aborted
+  preparation through the test's verdict event — which `runBare()` emits *before* its native after-test hook phase —
+  and restores the class's original hook list right there, so PHPUnit runs the real hooks itself: natively,
+  synchronously, with its exact blocking semantics (a Throwable from `tearDown()` is swallowed when the test already
+  errored, and errors a test whose `setUp()` merely skipped). The class's next test re-suppresses the hooks through
+  the existing lazy takeover.
+
+- **Stop dropping a skip signalled from a relocated `tearDown()`/`#[After]` hook.** Blocking PHPUnit turns a
+  `markTestSkipped()` call made in an after-test hook into a test **failure** (`SkippedWithMessageException` is an
+  `AssertionFailedError` to `runBare()`'s tearDown-phase handling) — it never becomes a skip. counit used to discard
+  the signal entirely: the test stayed passed and the run exited 0. The skip is now routed through the same deferred
+  path as a throwing hook — reported in the failure block after the summary, forcing exit code 1 — while mirroring
+  PHPUnit's own loop shape: the skip stops neither the remaining hooks nor emits a failed-hook event, and a later
+  hook's Throwable takes precedence over it. (A joined `#[Depends]` producer and a test whose `setUp()` aborted are
+  unaffected: their hooks run natively, so such a skip fails the test itself, exactly as under PHPUnit.)
+
 - **Support `#[DoesNotPerformAssertions]` and `expectNotToPerformAssertions()` in both approaches.** Every test used
   to be credited one assertion up front (to suppress the "did not perform any assertions" warning for assertions that
   run after a sleep/IO yield), which made PHPUnit flag any test declaring it performs no assertions as risky ("This

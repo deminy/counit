@@ -335,7 +335,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Stubs (`createStub()`, `createMock()` + `willReturn()` etc., no `expects()`) | ✅ | ✅ |
 | Mock `->expects(...)` **satisfied before** the first yield | ✅ | ✅ |
 | `setUp()`, `assertPreConditions()`, `setUpBeforeClass()`, `tearDownAfterClass()` | ✅ (run outside the coroutines: serialized, no speedup) | ✅ |
-| `tearDown()` / `#[After]` hooks | ✅ run after the finished test body (see notes for two caveats) | ✅ (`@after`) |
+| `tearDown()` / `#[After]` hooks | ✅ run after the finished test body — and still run (natively, with blocking semantics) for a test whose `setUp()` threw or skipped (see notes for two caveats) | ✅ (`@after`) |
 | `markTestSkipped()` / `markTestIncomplete()` **before** the first yield | ✅ | ✅ |
 | Process isolation (`#[RunInSeparateProcess]`, `#[RunTestsInSeparateProcesses]`, `--process-isolation`) | ✅ exact semantics — but no speedup, and each isolated test serializes the run | ✅ (annotations) |
 | `#[Depends]` / `#[DependsExternal]` (incl. deep/shallow clone variants) and `#[DependsOnClass]` | ✅ exact semantics — dependents receive the producer's real return value and are skipped when the producer fails, even after a yield. The producer itself (for `#[DependsOnClass]`: every test of the depended-on class) is run to completion before the run moves on, so it gets no speedup of its own — its dependents could not have overlapped with it anyway, and unrelated tests still do | ❌ (`@depends`) — breaks when the producer yields before finishing |
@@ -357,7 +357,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` | ❌ snapshot/restore fires while other tests are mid-flight | ❌ (annotations) |
 | `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished — except on a joined `#[Depends]` producer, whose whole after-test phase is PHPUnit's own | ✅ runs after the finished body |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
-| A `tearDown()` / `#[After]` hook that throws | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error — except on a joined `#[Depends]` producer, whose hooks run natively and error the test exactly as under PHPUnit | ⚠️ same, without the producer exception |
+| A `tearDown()` / `#[After]` hook that throws or skips | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error; a skip signalled from such a hook — a test **failure** under blocking _PHPUnit_, never a skip — is reported the same way. Fully native semantics apply on a joined `#[Depends]` producer and on a test whose `setUp()` threw or skipped (their hooks run natively) | ⚠️ same for a throwing hook, without the producer exception |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
 | Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
 | `--enforce-time-limit` | ❌ only measures up to the first yield | ❌ |
@@ -434,7 +434,14 @@ faster, with limitations apply. Here is a list of limitations of this package:
     preserved; ordering relative to the run's output is not.
   * A _tearDown()_ that throws cannot mark its own test as errored. _counit_ reports it in the failure block printed
     after the summary and exits with a non-zero code — as always, **the exit code of _counit_ is the authoritative
-    pass/fail signal**.
+    pass/fail signal**. A skip signalled from _tearDown()_ — which blocking _PHPUnit_ turns into a test *failure*,
+    never a skip — is reported through the same block: it fails the run, it is never silently dropped.
+
+  The relocated hooks only exist for a test whose body actually starts. When _setUp()_ — or another before-test
+  hook — throws or skips, the body never runs and no coroutine exists, so _counit_ hands the hooks straight back to
+  _PHPUnit_, which runs them natively, synchronously, with its exact blocking semantics: _tearDown()_ still runs, an
+  exception it raises after a failed _setUp()_ is swallowed (the _setUp()_ error stands), and one raised after a
+  _setUp()_ skip errors the test.
 
   The takeover reaches into _PHPUnit_ internals; should a future _PHPUnit_ release change them, _counit_ leaves
   _PHPUnit_'s own (too early) hook timing untouched and prints a notice — once per class; silence it with environment

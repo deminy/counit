@@ -63,6 +63,17 @@ class TestCase extends BaseTestCase
      */
     private static array $afterHookNoticeIssued = [];
 
+    /**
+     * Whether the most recently prepared test reached invokeTestMethod(). Cleared at each test's
+     * PreparationStarted event (see CounitExtension), set again when the body is invoked; a test
+     * still false when its verdict is emitted was aborted during preparation -- setUp() or another
+     * before-test hook threw or skipped -- and needs its after-test hooks handed back to PHPUnit
+     * (see handleAbortedTestPreparation()). Tests run sequentially through runBare() on the main
+     * coroutine, so one flag suffices; true initially and after every handling, so verdict events
+     * that never had a preparation (e.g. a test skipped over a failed dependency) are ignored.
+     */
+    private static bool $currentTestBodyInvoked = true;
+
     #[\Override]
     public static function setUpBeforeClass(): void
     {
@@ -87,6 +98,50 @@ class TestCase extends BaseTestCase
     }
 
     /**
+     * Clears the body-invoked marker at the start of each test's preparation phase; see
+     * $currentTestBodyInvoked.
+     *
+     * @internal called by CounitExtension at the Test\PreparationStarted event; not part of
+     *           counit's public API
+     */
+    public static function markTestPreparationStarted(): void
+    {
+        self::$currentTestBodyInvoked = false;
+    }
+
+    /**
+     * Reacts to a test's verdict (errored/failed/skipped/incomplete) being emitted while its body
+     * never reached invokeTestMethod(): the test was aborted during preparation -- setUp() or
+     * another before-test hook threw or skipped. Such a test never started a coroutine, so the
+     * relocated replay of its taken-over after-test hooks would never run; instead, the class's
+     * original hook list is restored here. runBare() emits the verdict BEFORE its native
+     * after-test hook phase, so PHPUnit then runs the real hooks itself -- synchronously, with
+     * its exact blocking semantics: tearDown() still runs, a Throwable it raises is swallowed
+     * when the test already errored, and turns a test its setUp() merely skipped into an error.
+     * The class's next test re-suppresses the hooks through the lazy takeover path.
+     *
+     * @internal called by CounitExtension at the Test\Errored/Failed/Skipped/MarkedIncomplete
+     *           events; not part of counit's public API
+     *
+     * @param class-string $className
+     */
+    public static function handleAbortedTestPreparation(string $className): void
+    {
+        if (self::$currentTestBodyInvoked || !isset(self::$takenOverAfterHookState[$className])) {
+            return;
+        }
+
+        // The same aborted test can emit a second verdict event (a restored tearDown() throwing
+        // after a setUp() skip re-errors the test); handle only the first.
+        self::$currentTestBodyInvoked = true;
+
+        // Cannot realistically fail (see setAfterTestHookSuppression()); if it ever does, this
+        // one test loses its after-test hooks -- degrading to the pre-restore behavior, never
+        // running anything twice.
+        self::setAfterTestHookSuppression(false, $className);
+    }
+
+    /**
      * {@inheritDoc}
      *
      * PHPUnit 10+ made TestCase::runBare() final, so the per-test coroutine wrapping is now
@@ -103,6 +158,11 @@ class TestCase extends BaseTestCase
     #[\Override]
     protected function invokeTestMethod(string $methodName, array $testArguments): mixed
     {
+        // Reaching this method means the test survived its whole preparation phase (setUp() and
+        // the other before-test hooks); see handleAbortedTestPreparation() for the tests that
+        // do not.
+        self::$currentTestBodyInvoked = true;
+
         if (Helper::isCoroutineFriendly()) {
             // Deliberately lazy: runBare() (final) captured the per-class hook *collection
             // objects* before the test started, so mutating a collection here still affects the
@@ -135,7 +195,7 @@ class TestCase extends BaseTestCase
                 // end-of-run block the relocated replay must use. The next test of the class
                 // re-suppresses the hooks through the lazy takeover path above; should the
                 // restore itself ever fail, the replay is used, exactly as for non-joined tests.
-                $restored = self::setAfterTestHookSuppression(false);
+                $restored = self::setAfterTestHookSuppression(false, static::class);
 
                 return Counit::createAndJoin(function () use ($methodName, $testArguments, $restored): mixed {
                     try {
@@ -220,7 +280,7 @@ class TestCase extends BaseTestCase
             // the re-suppression ever fail, the class degrades to the failed-takeover mode --
             // hooks run natively (early), exactly once, with the loud notice -- rather than
             // risking PHPUnit's native invocation AND the relocated replay both running.
-            if (!self::setAfterTestHookSuppression(true)) {
+            if (!self::setAfterTestHookSuppression(true, static::class)) {
                 $hooks                                    = self::$relocatedAfterHooks[static::class];
                 self::$relocatedAfterHooks[static::class] = [];
                 unset(self::$takenOverAfterHookState[static::class]);
@@ -280,10 +340,14 @@ class TestCase extends BaseTestCase
      * again there, along with its exact error handling -- a throwing tearDown() errors the test,
      * just as in blocking mode. Returns whether the collection is now in the requested state
      * (true also when there is nothing to flip, because no hooks were taken over for the class).
+     * The class is an explicit parameter because handleAbortedTestPreparation() flips the state
+     * of a class it only knows by name, from outside any late-static-binding context.
+     *
+     * @param class-string $className
      */
-    private static function setAfterTestHookSuppression(bool $suppressed): bool
+    private static function setAfterTestHookSuppression(bool $suppressed, string $className): bool
     {
-        $state = self::$takenOverAfterHookState[static::class] ?? null;
+        $state = self::$takenOverAfterHookState[$className] ?? null;
         if ($state === null || $state['suppressed'] === $suppressed) {
             return true;
         }
@@ -296,7 +360,7 @@ class TestCase extends BaseTestCase
                 $state['collection'],
                 $suppressed ? [new HookMethod(self::AFTER_HOOKS_SUPPRESSED, 0)] : $state['original']
             );
-            self::$takenOverAfterHookState[static::class]['suppressed'] = $suppressed;
+            self::$takenOverAfterHookState[$className]['suppressed'] = $suppressed;
 
             return true;
         } catch (\Throwable) {
@@ -349,10 +413,15 @@ class TestCase extends BaseTestCase
             if ($failure instanceof SkippedTest) {
                 // Blocking PHPUnit treats a skip signalled from an after-test hook as a test
                 // FAILURE (SkippedWithMessageException is an AssertionFailedError caught by
-                // runBare()'s tearDown-phase handling) -- but this test's verdict was already
-                // emitted at the body's first yield, so the signal is dropped here rather than
-                // reported as a failure of the run. (A joined #[Depends] producer does not take
-                // this path: its hooks run natively, with PHPUnit's own semantics.)
+                // runBare()'s tearDown-phase handling) -- it never becomes a skip. This test's
+                // verdict was already emitted at the body's first yield, so the closest match is
+                // the deferred-failure path: reported after the summary, with exit code 1.
+                // Mirroring PHPUnit's own loop, the skip stops neither hook invocation nor emits
+                // a failed-hook event, and a later hook's Throwable takes precedence over it.
+                // (A joined #[Depends] producer does not take this path: its hooks run natively,
+                // with PHPUnit's own semantics.)
+                $thrown = $failure;
+
                 continue;
             }
 

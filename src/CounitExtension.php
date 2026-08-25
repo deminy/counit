@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Event\Code\Test;
+use PHPUnit\Event\Test\Errored as TestErrored;
+use PHPUnit\Event\Test\ErroredSubscriber as TestErroredSubscriber;
+use PHPUnit\Event\Test\Failed as TestFailed;
+use PHPUnit\Event\Test\FailedSubscriber as TestFailedSubscriber;
 use PHPUnit\Event\Test\Finished as TestFinished;
 use PHPUnit\Event\Test\FinishedSubscriber as TestFinishedSubscriber;
+use PHPUnit\Event\Test\MarkedIncomplete as TestMarkedIncomplete;
+use PHPUnit\Event\Test\MarkedIncompleteSubscriber as TestMarkedIncompleteSubscriber;
 use PHPUnit\Event\Test\PreparationStarted as TestPreparationStarted;
 use PHPUnit\Event\Test\PreparationStartedSubscriber as TestPreparationStartedSubscriber;
+use PHPUnit\Event\Test\Skipped as TestSkipped;
+use PHPUnit\Event\Test\SkippedSubscriber as TestSkippedSubscriber;
 use PHPUnit\Event\TestRunner\ExecutionFinished;
 use PHPUnit\Event\TestRunner\ExecutionFinishedSubscriber;
 use PHPUnit\Event\TestSuite\Loaded as TestSuiteLoaded;
@@ -29,6 +38,18 @@ use Swoole\Coroutine;
  */
 final class CounitExtension implements Extension
 {
+    /**
+     * Shared body of the four verdict subscribers registered in bootstrap(): forwards the test's
+     * class to TestCase::handleAbortedTestPreparation(), which no-ops unless the test was aborted
+     * during preparation and its class has taken-over after-test hooks.
+     */
+    public static function handleTestVerdict(Test $test): void
+    {
+        if ($test->isTestMethod()) {
+            TestCase::handleAbortedTestPreparation($test->className());
+        }
+    }
+
     #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
@@ -64,6 +85,43 @@ final class CounitExtension implements Extension
                     }
 
                     Attribution::testStarting($test->id());
+                    TestCase::markTestPreparationStarted();
+                }
+            });
+
+            // A test whose verdict is emitted although its body never reached invokeTestMethod()
+            // was aborted during preparation: setUp() or another before-test hook threw or
+            // skipped. Its taken-over after-test hooks must be handed back to PHPUnit, whose own
+            // (native, synchronous) hook invocation is still ahead of these events -- otherwise
+            // tearDown()/#[After] would be lost for that test, while blocking PHPUnit runs them.
+            // All four verdicts runBare() can emit for an aborted preparation are covered; see
+            // TestCase::handleAbortedTestPreparation() for the details.
+            $facade->registerSubscriber(new class implements TestErroredSubscriber {
+                #[\Override]
+                public function notify(TestErrored $event): void
+                {
+                    CounitExtension::handleTestVerdict($event->test());
+                }
+            });
+            $facade->registerSubscriber(new class implements TestFailedSubscriber {
+                #[\Override]
+                public function notify(TestFailed $event): void
+                {
+                    CounitExtension::handleTestVerdict($event->test());
+                }
+            });
+            $facade->registerSubscriber(new class implements TestSkippedSubscriber {
+                #[\Override]
+                public function notify(TestSkipped $event): void
+                {
+                    CounitExtension::handleTestVerdict($event->test());
+                }
+            });
+            $facade->registerSubscriber(new class implements TestMarkedIncompleteSubscriber {
+                #[\Override]
+                public function notify(TestMarkedIncomplete $event): void
+                {
+                    CounitExtension::handleTestVerdict($event->test());
                 }
             });
 
