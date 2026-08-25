@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Framework\IncompleteTest;
+use PHPUnit\Framework\SkippedTest;
 use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
 
@@ -54,6 +56,17 @@ class Counit
      * @var array<string, \Throwable>
      */
     public static $deferredFailures = [];
+
+    /**
+     * Like $deferredFailures, but for a markTestSkipped()/markTestIncomplete() call that happened
+     * only after the test's coroutine had already yielded: PHPUnit reported the test as passed at
+     * that first yield, and its status cannot be changed afterwards. Unlike a real late failure,
+     * this must not fail the run -- blocking PHPUnit exits 0 for skipped/incomplete tests -- so
+     * the `counit` script only prints these as a notice, without touching the exit code.
+     *
+     * @var array<string, \Throwable>
+     */
+    public static $deferredSkips = [];
 
     /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
@@ -109,7 +122,11 @@ class Counit
                     // created; it is flipped to true (by reference) below, before a coroutine
                     // that yielded resumes and can reach this catch block.
                     if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
-                        self::$deferredFailures[$description] = $e;
+                        if (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
+                            self::$deferredSkips[$description] = $e;
+                        } else {
+                            self::$deferredFailures[$description] = $e;
+                        }
                     } else {
                         $caught = $e;
                     }

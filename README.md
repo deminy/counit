@@ -345,6 +345,13 @@ faster, with limitations apply. Here is a list of limitations of this package:
     _Counit::create()_ first yields on a sleep/IO call — possibly while that callback is still running. Put
     order-sensitive cleanup inside a `try { ... } finally { ... }` block within the callback instead of in
     _tearDown()_.
+* A _markTestSkipped()_ or _markTestIncomplete()_ call made after the test's first sleep/IO yield cannot change the
+  test's status anymore: _PHPUnit_ already reported the test as passed at that yield. _counit_ lists such tests in a
+  notice at the end of the run — their status remains "passed" — without failing the run, matching the exit code of a
+  blocking run (where skipped/incomplete tests do not fail the run either). To have the skip honored, call it before
+  the first yield.
+* Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
+  with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
 
 # Local Development
 

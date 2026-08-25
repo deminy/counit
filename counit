@@ -89,8 +89,27 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
+// PHPUnit's --repeat re-runs the very same TestCase objects. Under the coroutine runner the
+// repeated passes overlap -- a later pass starts while an earlier pass's coroutines are still
+// pending on their sleep/IO yields -- and the state those objects share (output-buffer
+// bookkeeping, assertion counts, mock registries) gets corrupted; in practice the run hangs in an
+// endless ob_end_clean() loop. Repeated runs are inherently serial anyway, so run them in blocking
+// mode, exactly as if the Swoole extension were not loaded.
+$repeatRequested = false;
+foreach ($_SERVER['argv'] as $arg) {
+    if ($arg === '--repeat' || strpos($arg, '--repeat=') === 0) {
+        $repeatRequested = true;
+        break;
+    }
+}
+unset($arg);
+
+if ($repeatRequested && extension_loaded('swoole')) {
+    fwrite(STDERR, 'counit notice: --repeat runs in blocking mode; repeated passes reuse the same test objects, which cannot overlap with coroutines.' . PHP_EOL);
+}
+
 // Swoole is enabled? Then try to run unit tests in parallel using different coroutines!
-if (extension_loaded('swoole')) {
+if (extension_loaded('swoole') && !$repeatRequested) {
     Swoole\Coroutine::set(
         [
             // Swoole only honors hook flags configured before the coroutine scheduler starts, so
@@ -125,6 +144,18 @@ if (extension_loaded('swoole')) {
         }
         fwrite(STDERR, PHP_EOL);
         $code = 1;
+    }
+
+    // A markTestSkipped()/markTestIncomplete() call made after the test's first yield cannot
+    // change the test's status anymore -- PHPUnit already reported the test as passed -- and,
+    // unlike a late failure, must not fail the run: plain PHPUnit exits 0 for skipped/incomplete
+    // tests. Make the divergence visible instead of silent.
+    if (!empty(Deminy\Counit\Counit::$deferredSkips)) {
+        fwrite(STDERR, PHP_EOL . 'The following tests were marked skipped/incomplete only after they had already been reported' . PHP_EOL . 'as passed (the call happened after a sleep()/IO yield point); their status remains "passed":' . PHP_EOL . PHP_EOL);
+        foreach (Deminy\Counit\Counit::$deferredSkips as $testDescription => $throwable) {
+            fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
+        }
+        fwrite(STDERR, PHP_EOL);
     }
 
     // PHPUnit's --fail-on-risky/--fail-on-incomplete/--fail-on-skipped checks (and their XML
