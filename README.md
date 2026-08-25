@@ -338,6 +338,13 @@ faster, with limitations apply. Here is a list of limitations of this package:
     risky occasionally — the per-test attribution caveat above.
   * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
     method-level annotation is honored), with or without _counit_.
+* The timing of _tearDown()_ differs between the two approaches:
+  * **The automatic approach** runs the whole test lifecycle — _setUp()_, the test method, and _tearDown()_ — inside
+    one coroutine, so _tearDown()_ always observes a finished test body, exactly as under plain _PHPUnit_.
+  * **The manual approach** leaves the lifecycle to _PHPUnit_: _tearDown()_ runs as soon as the callback passed to
+    _Counit::create()_ first yields on a sleep/IO call — possibly while that callback is still running. Put
+    order-sensitive cleanup inside a `try { ... } finally { ... }` block within the callback instead of in
+    _tearDown()_.
 
 # Local Development
 
