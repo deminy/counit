@@ -18,6 +18,7 @@ Table of Contents
    * [The Automatic Approach](#the-automatic-approach-recommended)
    * [The Manual Approach](#the-manual-approach)
    * [Comparisons](#comparisons)
+* [Compatibility with PHPUnit](#compatibility-with-phpunit)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
@@ -305,6 +306,63 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
     <td>7 seconds</td>
   </tr>
 </table>
+
+# Compatibility with PHPUnit
+
+_Counit_ is designed as a drop-in companion to _PHPUnit_, not a replacement. In short:
+
+* When the Swoole extension is not enabled, unit tests written for _PHPUnit_ and/or _counit_ run in _PHPUnit_ and/or
+  _counit_ in exactly the same way, without any changes: every _counit_ API falls back to plain blocking behavior.
+* Unit tests written for _counit_ run in _PHPUnit_ without any issue, **with or without** the Swoole extension
+  loaded: _counit_'s coroutine behavior activates only inside the coroutine scheduler that the _counit_ runner itself
+  starts, which plain _PHPUnit_ never does — a loaded-but-idle Swoole extension changes nothing.
+
+The two matrices below therefore describe the one remaining combination: running tests **under the _counit_ runner
+with Swoole enabled** — the fast, concurrent mode this package exists for. The _Counit 0.x_ column (the maintenance
+line for _PHPUnit_ ~8.0/~9.0, which uses annotations instead of attributes and a different internal architecture) is
+included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠️ works, with documented differences;
+❌ do not rely on it under Swoole. Details for every ⚠️/❌ entry are in [Additional Notes](#additional-notes).
+
+## Compatible features
+
+| Feature | Counit 1.x | Counit 0.x |
+|---|---|---|
+| Test discovery and naming (`test*` methods, `#[Test]`) | ✅ | ✅ (`@test`) |
+| Assertions (`assert*()`); the run's reported **total** | ✅ exact | ✅ exact |
+| `#[DataProvider]` / `#[TestWith]` | ✅ (providers themselves run serialized, at collection time) | ✅ (`@dataProvider`) |
+| `#[DoesNotPerformAssertions]`; `expectNotToPerformAssertions()` in `setUp()` or at the top of the test body | ✅ (method and class level) | ✅ (`@doesNotPerformAssertions`; method level only — _PHPUnit_ 8/9 itself ignores the class-level annotation) |
+| `expectException()` and friends, exception thrown **before** the first yield | ✅ | ✅ |
+| Stubs (`createStub()`, `createMock()` + `willReturn()` etc., no `expects()`) | ✅ | ✅ |
+| Mock `->expects(...)` **satisfied before** the first yield | ✅ | ✅ |
+| `setUp()`, `assertPreConditions()`, `setUpBeforeClass()`, `tearDownAfterClass()` | ✅ (run outside the coroutines: serialized, no speedup) | ✅ |
+| `tearDown()` / `#[After]` hooks | ✅ run after the finished test body (see notes for two caveats) | ✅ (`@after`) |
+| `markTestSkipped()` / `markTestIncomplete()` **before** the first yield | ✅ | ✅ |
+| Process isolation (`#[RunInSeparateProcess]`, `#[RunTestsInSeparateProcesses]`, `--process-isolation`) | ✅ exact semantics — but no speedup, and each isolated test serializes the run | ✅ (annotations) |
+| Test selection: `--filter`, `--testsuite`, `--group` / `#[Group]`, `--exclude-group` | ✅ | ✅ |
+| `#[Requires*]` preconditions | ✅ | ✅ (`@requires`) |
+| `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
+| `--fail-on-risky` / `--fail-on-incomplete` / `--fail-on-skipped` | ✅ | ✅ |
+| Exit code as the pass/fail signal | ✅ authoritative (failures after a yield force a non-zero exit) | ✅ |
+
+## Incompatible features
+
+| Feature | Counit 1.x | Counit 0.x (reference) |
+|---|---|---|
+| `#[Depends]` (and variants like `#[DependsExternal]`) | ❌ dependent tests receive `NULL` instead of the producer's return value, and "skip dependents on failure" is weakened | ❌ (`@depends`, same class of problem) |
+| Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures | ✅ verified after the finished body |
+| `expectException()` where the throw happens **after** a yield | ❌ the test fails "exception not thrown", and the exception resurfaces as a deferred failure | ❌ |
+| `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
+| `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
+| Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
+| `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` | ❌ snapshot/restore fires while other tests are mid-flight | ❌ (annotations) |
+| `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished | ✅ runs after the finished body |
+| Per-test reporting: per-test assertion counts, durations, TestDox numbers, `--log-junit`/TeamCity logs | ⚠️ approximate; a failure after a yield is logged as PASSED in XML — trust the exit code, not the logs | ⚠️ same |
+| A `tearDown()` that throws | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error | ⚠️ same |
+| `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
+| Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
+| `--enforce-time-limit` | ❌ only measures up to the first yield | ❌ |
+| Code coverage | ⚠️ per-test attribution wrong by construction; aggregate coverage unverified | ⚠️ same |
+| `--repeat` | (option removed in _PHPUnit_ 10+) | ⚠️ runs in blocking mode — correct, but without speedup |
 
 # Additional Notes
 
