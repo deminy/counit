@@ -128,12 +128,14 @@ if (extension_loaded('swoole')) {
         $code = 1;
     }
 
-    // A markTestSkipped()/markTestIncomplete() call made after the test's first yield cannot
-    // change the test's status anymore -- PHPUnit already reported the test as passed -- and,
-    // unlike a late failure, must not fail the run: plain PHPUnit exits 0 for skipped/incomplete
-    // tests. Make the divergence visible instead of silent.
+    // A markTestSkipped()/markTestIncomplete() call made after the test's first yield is
+    // normally replayed through PHPUnit's own Test\Skipped/Test\MarkedIncomplete events once
+    // every coroutine has drained (see LateSkips), which removes it from this list. Anything
+    // still here could not be recorded retroactively (changed PHPUnit internals); make that
+    // divergence visible instead of silent -- without failing the run: plain PHPUnit exits 0
+    // for skipped/incomplete tests.
     if (Deminy\Counit\Counit::$deferredSkips !== []) {
-        fwrite(STDERR, PHP_EOL . 'The following tests were marked skipped/incomplete only after they had already been reported' . PHP_EOL . 'as passed (the call happened after a sleep()/IO yield point); their status remains "passed":' . PHP_EOL . PHP_EOL);
+        fwrite(STDERR, PHP_EOL . 'The following tests were marked skipped/incomplete only after they had already been reported' . PHP_EOL . 'as passed, and could not be recorded in the summary retroactively; their status remains "passed":' . PHP_EOL . PHP_EOL);
         foreach (Deminy\Counit\Counit::$deferredSkips as $testDescription => $throwable) {
             fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
         }

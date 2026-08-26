@@ -14,7 +14,8 @@ use PHPUnit\Framework\Attributes\DoesNotPerformAssertions;
  * a test that aborts only after a yield (blocking PHPUnit exempts aborted tests from the check)
  * must never be reported. The compatibility workflow asserts the ABSENCE of the risky message
  * for this file, in both modes -- guarding against a future change accidentally flagging any of
- * these three shapes.
+ * these three shapes. Since the LateSkips replay, the post-yield skip also appears in the
+ * summary (Skipped: 1) identically in both modes -- and must STILL not be flagged risky.
  *
  * @internal
  * @coversNothing

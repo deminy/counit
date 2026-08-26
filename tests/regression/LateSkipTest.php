@@ -7,12 +7,15 @@ namespace Deminy\Counit\Tests;
 use Deminy\Counit\TestCase;
 
 /**
- * Regression guard for skip/incomplete handling under the coroutine runner; deliberately NOT part
- * of the gated compatibility suite, because the two modes are expected to differ here: a skip
- * signalled before the first yield is honored in both modes, while one signalled after the first
- * yield cannot change the test's status anymore (PHPUnit already reported the test as passed) and
- * must be listed in an end-of-run notice without failing the run. The compatibility workflow runs
- * this file separately and asserts each mode's own expected output, including exit code 0.
+ * Regression guard for skip/incomplete handling under the coroutine runner. A skip signalled
+ * before the first yield is native in both modes; one signalled after the first yield lands
+ * after PHPUnit already reported the test as passed and used to surface only as a counit STDERR
+ * notice -- absent from the summary, invisible to --fail-on-skipped/--fail-on-incomplete. It is
+ * now replayed through PHPUnit's own Test\Skipped/Test\MarkedIncomplete events once every
+ * coroutine has drained (see LateSkips), so the summary counts, the listings and the --fail-on-*
+ * exit codes match blocking mode exactly. Run by the compatibility workflow, which asserts the
+ * exact blocking-mode summary -- identical with and without Swoole -- plus both --fail-on-* exit
+ * codes and the absence of the (now fallback-only) notice.
  *
  * @internal
  * @coversNothing
@@ -21,18 +24,18 @@ class LateSkipTest extends TestCase
 {
     public function testSkippedBeforeYield(): void
     {
-        self::markTestSkipped('skipped before the first yield: honored in both modes');
+        self::markTestSkipped('skipped before the first yield: native in both modes');
     }
 
     public function testSkippedAfterYield(): void
     {
         sleep(1);
-        self::markTestSkipped('skipped after the first yield: status remains "passed" under Swoole');
+        self::markTestSkipped('skipped after the first yield: replayed at the end of the run');
     }
 
     public function testIncompleteAfterYield(): void
     {
         sleep(1);
-        self::markTestIncomplete('incomplete after the first yield: status remains "passed" under Swoole');
+        self::markTestIncomplete('incomplete after the first yield: replayed at the end of the run');
     }
 }

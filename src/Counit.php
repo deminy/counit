@@ -152,9 +152,12 @@ class Counit
             $capturedOutput   = '';
             $outputLevelDelta = 0;
             $done             = new Coroutine\Channel(1);
-            $testId           = $caller instanceof TestCase ? $caller->valueObjectForEvents()->id() : null;
+            // The event value object is stashed for LateSkips rather than re-derived later from
+            // its ID: ID-string matching silently misses data-provider tests.
+            $testValueObject = $caller instanceof TestCase ? $caller->valueObjectForEvents() : null;
+            $testId          = $testValueObject?->id();
 
-            $id = Coroutine::create(function () use ($callable, $caller, $testId, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, $testId, $testValueObject, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($testId);
                 HandlerIsolation::sliceStarted();
                 $obHandle = OutputCapture::start();
@@ -173,6 +176,7 @@ class Counit
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
+                            LateSkips::markDeferred($testValueObject, $description, $e);
                             self::markAbortedAfterReport($testId);
                         } else {
                             self::$deferredFailures[$description] = $e;
@@ -189,7 +193,15 @@ class Counit
                         // the test's own error when the body succeeded synchronously; after a
                         // yield it is queued under its own key, so both failures get reported.
                         if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
-                            self::$deferredFailures[$description . ' (deferred cleanup)'] = $e;
+                            // Classified like a body throwable: blocking PHPUnit turns a skip
+                            // signalled from a cleanup into a skipped test with exit code 0, so
+                            // it must not be filed as a failure that forces exit code 1.
+                            if (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
+                                self::$deferredSkips[$description . ' (deferred cleanup)'] = $e;
+                                LateSkips::markDeferred($testValueObject, $description . ' (deferred cleanup)', $e);
+                            } else {
+                                self::$deferredFailures[$description . ' (deferred cleanup)'] = $e;
+                            }
                             self::markAbortedAfterReport($testId);
                         } elseif ($caught === null) {
                             $caught = $e;

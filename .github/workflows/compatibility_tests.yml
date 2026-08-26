@@ -43,25 +43,42 @@ jobs:
           grep -qF 'OK (59 tests, 72 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
-        # A skip/incomplete signalled after the test's first yield cannot change the test's status
-        # anymore (PHPUnit already reported the test as passed); counit must list such tests in an
-        # end-of-run notice WITHOUT failing the run, while a skip requested before the first yield
-        # keeps full PHPUnit semantics. The two modes deliberately diverge here, so each is
-        # asserted against its own expected output; the exit code must be 0 in both. This cannot
-        # live in the exact-summary-gated suite above, since a skipped test changes that summary
-        # line by design.
+        # A skip/incomplete signalled after the test's first yield cannot be made native (the
+        # Throwable only exists after PHPUnit reported the test as passed), but it is now
+        # replayed through PHPUnit's own Test\Skipped/Test\MarkedIncomplete events once every
+        # coroutine has drained (see LateSkips): the summary counts, the listings and the
+        # --fail-on-skipped/--fail-on-incomplete exit codes match blocking mode exactly, so the
+        # expected output is identical with and without Swoole and the old STDERR notice must be
+        # absent. The data-set target pins the identity handling (deferred verdicts are stashed
+        # with the test's event value object -- ID-string matching silently misses data-provider
+        # tests); the cleanup target pins that a skip from a Counit::defer() cleanup is a skip
+        # with exit code 0, not a deferred failure forcing exit code 1. These cannot live in the
+        # exact-summary-gated suite above, since skipped tests change that summary line by
+        # design.
         run: |
-          set -o pipefail
-          ./counit -c phpunit.xml.dist tests/regression/LateSkipTest.php > /tmp/late-skip.log 2> /tmp/late-skip.err
-          cat /tmp/late-skip.log /tmp/late-skip.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/late-skip.log
-            grep -qF 'status remains "passed"' /tmp/late-skip.err
-            grep -qF 'LateSkipTest::testSkippedAfterYield' /tmp/late-skip.err
-            grep -qF 'LateSkipTest::testIncompleteAfterYield' /tmp/late-skip.err
-          else
-            grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
-          fi
+          for target in LateSkipTest LateSkipCleanupTest LateSkipDataSetTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/late-skip.log 2> /tmp/late-skip.err || rc=$?
+            cat /tmp/late-skip.log /tmp/late-skip.err
+            test "$rc" -eq 0
+            # The verdicts are native now: neither the fallback notice nor a deferred failure
+            # may appear.
+            ! grep -qF 'status remains "passed"' /tmp/late-skip.err
+            ! grep -qF 'already been reported as passed' /tmp/late-skip.err
+            case "$target" in
+              LateSkipTest)        grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log ;;
+              LateSkipCleanupTest) grep -qF 'Tests: 1, Assertions: 1, Skipped: 1.' /tmp/late-skip.log ;;
+              LateSkipDataSetTest) grep -qF 'Tests: 2, Assertions: 1, Skipped: 1.' /tmp/late-skip.log ;;
+            esac
+          done
+          # The late verdicts appear in the listings with their real names and messages ...
+          ./counit -c phpunit.xml.dist --display-skipped --display-incomplete tests/regression/LateSkipTest.php > /tmp/late-skip.log 2> /dev/null
+          grep -qF 'LateSkipTest::testSkippedAfterYield' /tmp/late-skip.log
+          grep -qF 'skipped after the first yield: replayed at the end of the run' /tmp/late-skip.log
+          grep -qF 'LateSkipTest::testIncompleteAfterYield' /tmp/late-skip.log
+          # ... and the --fail-on-* exit codes are exact in both modes.
+          rc=0; ./counit -c phpunit.xml.dist --fail-on-skipped    tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+          rc=0; ./counit -c phpunit.xml.dist --fail-on-incomplete tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
 
       - name: Test Depends Failure Semantics
         # A producer failing only after a yield used to be recorded as passed at that yield: its
@@ -392,10 +409,12 @@ jobs:
             grep -qF "$quiet" /tmp/useless.log
           done
           # Exemptions: a declared-none test (attribute or in-body call) and a post-yield abort
-          # are never reported, in either mode.
+          # are never reported, in either mode -- and since the LateSkips replay, the post-yield
+          # skip appears in the summary identically in both modes while STILL not being flagged.
           ./counit -c phpunit.xml.dist tests/regression/UselessTestExemptTest.php > /tmp/useless.log 2>&1
           cat /tmp/useless.log
           ! grep -qF 'did not perform any assertions' /tmp/useless.log
+          grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/useless.log
           # Documented residual: an unobservable yield stays silent under Swoole (never a false
           # accusation), and is flagged natively without it.
           rc=0
