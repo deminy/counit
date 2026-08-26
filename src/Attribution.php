@@ -74,6 +74,16 @@ final class Attribution
     private static int $mark = 0;
 
     /**
+     * Tests whose coroutine was observed executing code it did not hold the counter for -- i.e.
+     * it was resumed at a point counit cannot observe (hooked network IO, a fully-qualified
+     * \sleep(), a test class in the global namespace). Their own tally is an undercount, so it
+     * must never be treated as proof of anything; see UselessTests.
+     *
+     * @var array<string, true>
+     */
+    private static array $unattributed = [];
+
+    /**
      * @var array<string, true> namespaces a sleep()/usleep() shim was installed in (or found
      *                          occupied and left alone)
      */
@@ -110,6 +120,7 @@ final class Attribution
             return;
         }
 
+        self::verifyHeldCounter();
         self::switchTo(null);
         unset(self::$cidOwner[self::currentCoroutineId()]);
     }
@@ -121,7 +132,17 @@ final class Attribution
             return;
         }
 
+        self::verifyHeldCounter();
         self::switchTo(null);
+    }
+
+    /**
+     * Whether the test's coroutine was ever observed running unattributed code -- in which case
+     * its own per-test tally is an undercount and proves nothing.
+     */
+    public static function unattributedFor(string $testId): bool
+    {
+        return isset(self::$unattributed[$testId]);
     }
 
     /** The current coroutine has just been resumed: re-claim the counter for its owner. */
@@ -249,6 +270,20 @@ final class Attribution
             self::suspended();
             Coroutine::sleep(max(0.001, $microseconds / 1_000_000));
             self::resumed();
+        }
+    }
+
+    /**
+     * Called at every point where the CURRENT coroutine releases the counter. If it is not the
+     * declared owner at that moment, the code it just executed ran unattributed: the coroutine
+     * was resumed without passing an observation point, so its own tally cannot be trusted.
+     */
+    private static function verifyHeldCounter(): void
+    {
+        $owner = self::$cidOwner[self::currentCoroutineId()] ?? null;
+
+        if ($owner !== null && self::$current !== $owner) {
+            self::$unattributed[$owner] = true;
         }
     }
 

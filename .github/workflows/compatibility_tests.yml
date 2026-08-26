@@ -357,6 +357,57 @@ jobs:
             grep -qF 'the run is serialized' /tmp/output.err
           fi
 
+      - name: Test Useless-Test Detection
+        # The "did not perform any assertions" risky check (and its mirror, "not expected to
+        # perform assertions but performed N") reads the count the moment the test method
+        # invocation returns -- under counit, the body's first yield -- so counit's up-front
+        # credit, which exists to suppress FALSE risky verdicts for post-yield assertions, used
+        # to also suppress every TRUE one. Now the credit is declined once the body is known
+        # finished (native verdicts for never-yielding tests), and for yielding tests whose
+        # coroutine never ran unattributed code the verdict is emitted at the end of the run
+        # through PHPUnit's own ConsideredRisky event -- listing, summary count and the
+        # --fail-on-risky exit code included. This step asserts summaries AND exit codes in all
+        # three flag states; the exempt file asserts the ABSENCE of the message; the
+        # unobservable file pins the documented residual (silent under Swoole -- an
+        # untrustworthy tally must never become a false accusation -- flagged without it).
+        run: |
+          for target in UselessTestTest UselessTestManualTest UselessTestSiblingTest; do
+            case "$target" in
+              UselessTestTest)        plain='Tests: 3, Assertions: 1, Risky: 2.'; quiet='OK (3 tests, 1 assertion)' ;;
+              UselessTestManualTest)  plain='Tests: 2, Assertions: 1, Risky: 1.'; quiet='OK (2 tests, 1 assertion)' ;;
+              UselessTestSiblingTest) plain='Tests: 2, Assertions: 2, Risky: 2.'; quiet='OK (2 tests, 2 assertions)' ;;
+            esac
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/useless.log 2>&1 || rc=$?
+            cat /tmp/useless.log
+            test "$rc" -eq 0
+            grep -qF "$plain" /tmp/useless.log
+            rc=0
+            ./counit -c phpunit.xml.dist --fail-on-risky "tests/regression/${target}.php" > /dev/null 2>&1 || rc=$?
+            test "$rc" -eq 1
+            rc=0
+            ./counit -c phpunit.xml.dist --do-not-report-useless-tests "tests/regression/${target}.php" > /tmp/useless.log 2>&1 || rc=$?
+            cat /tmp/useless.log
+            test "$rc" -eq 0
+            grep -qF "$quiet" /tmp/useless.log
+          done
+          # Exemptions: a declared-none test (attribute or in-body call) and a post-yield abort
+          # are never reported, in either mode.
+          ./counit -c phpunit.xml.dist tests/regression/UselessTestExemptTest.php > /tmp/useless.log 2>&1
+          cat /tmp/useless.log
+          ! grep -qF 'did not perform any assertions' /tmp/useless.log
+          # Documented residual: an unobservable yield stays silent under Swoole (never a false
+          # accusation), and is flagged natively without it.
+          rc=0
+          ./counit -c phpunit.xml.dist --fail-on-risky tests/regression/UselessTestUnobservableTest.php > /tmp/useless.log 2>&1 || rc=$?
+          cat /tmp/useless.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 0
+          else
+            test "$rc" -eq 1
+            grep -qF 'This test did not perform any assertions' /tmp/useless.log
+          fi
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

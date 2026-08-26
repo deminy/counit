@@ -97,6 +97,17 @@ class Counit
     private static array $appliedCredits = [];
 
     /**
+     * Per test ID: whether the test declared -- through #[DoesNotPerformAssertions] or
+     * expectNotToPerformAssertions() -- that it performs no assertions. Recorded once its
+     * coroutine has finished, so a declaration made anywhere inside the body counts. PHPUnit
+     * exempts such tests from the "did not perform any assertions" check (and flags them through
+     * the mirror check instead); see UselessTests.
+     *
+     * @var array<string, true>
+     */
+    private static array $declaresNoAssertions = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -134,6 +145,7 @@ class Counit
 
             $caught           = null;
             $alreadyReturned  = false;
+            $finished         = false;
             $joining          = false;
             $thrown           = null;
             $capturedOutput   = '';
@@ -141,7 +153,7 @@ class Counit
             $done             = new Coroutine\Channel(1);
             $testId           = $caller instanceof TestCase ? $caller->valueObjectForEvents()->id() : null;
 
-            $id = Coroutine::create(function () use ($callable, $caller, $testId, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, $testId, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($testId);
                 $obHandle = OutputCapture::start();
 
@@ -159,8 +171,10 @@ class Counit
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
+                            self::markAbortedAfterReport($testId);
                         } else {
                             self::$deferredFailures[$description] = $e;
+                            self::markAbortedAfterReport($testId);
                         }
                     } else {
                         $caught = $e;
@@ -174,6 +188,7 @@ class Counit
                         // yield it is queued under its own key, so both failures get reported.
                         if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
                             self::$deferredFailures[$description . ' (deferred cleanup)'] = $e;
+                            self::markAbortedAfterReport($testId);
                         } elseif ($caught === null) {
                             $caught = $e;
                         }
@@ -201,6 +216,8 @@ class Counit
                         echo $capturedOutput;
                         $capturedOutput = '';
                     }
+
+                    $finished = true;
 
                     Attribution::coroutineFinished();
                     $done->push(true);
@@ -310,7 +327,14 @@ class Counit
                 $capturedOutput = '';
             }
 
-            self::creditCaller($caller, $count);
+            // A body that ran to completion without ever yielding needs no credit either:
+            // PHPUnit is about to read the test's real, final count, exactly as in blocking
+            // mode -- so a test that genuinely performed no assertions is flagged risky
+            // natively, at the right moment, and one that did assert is not inflated. Flipped
+            // by reference from inside the coroutine.
+            if (!$finished) {
+                self::creditCaller($caller, $count);
+            }
 
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
         }
@@ -542,6 +566,15 @@ class Counit
     }
 
     /**
+     * Whether the test declared -- at any point up to its coroutine's end -- that it performs no
+     * assertions; see $declaresNoAssertions.
+     */
+    public static function declaresNoAssertionsFor(string $testId): bool
+    {
+        return isset(self::$declaresNoAssertions[$testId]);
+    }
+
+    /**
      * Credits the calling test with $count assertions up front, unless it declared -- through
      * #[DoesNotPerformAssertions] or expectNotToPerformAssertions() -- that it performs none, in
      * which case PHPUnit would report the credited test as risky ("This test is not expected to
@@ -562,6 +595,19 @@ class Counit
     }
 
     /**
+     * A test whose body errored, skipped or went incomplete only after PHPUnit had already
+     * reported it (see $deferredFailures/$deferredSkips). Blocking PHPUnit exempts errored,
+     * skipped and incomplete tests from the "did not perform any assertions" check, so the
+     * deferred pass must exempt them too; see UselessTests.
+     */
+    private static function markAbortedAfterReport(?string $testId): void
+    {
+        if ($testId !== null) {
+            UselessTests::markAborted($testId);
+        }
+    }
+
+    /**
      * Records a test's assertion count as read inside its coroutine after everything has run. The
      * maximum wins: a test may wrap several coroutines (manual approach), and the instance counter
      * only ever grows within a test's lifecycle, so the highest reading is the latest one.
@@ -570,6 +616,10 @@ class Counit
     {
         $testId = $test->valueObjectForEvents()->id();
         $count  = $test->numberOfAssertionsPerformed();
+
+        if ($test->doesNotPerformAssertions()) {
+            self::$declaresNoAssertions[$testId] = true;
+        }
 
         if ($count > (self::$finalAssertionCounts[$testId] ?? -1)) {
             self::$finalAssertionCounts[$testId] = $count;

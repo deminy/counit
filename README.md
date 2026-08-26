@@ -355,7 +355,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 |---|---|---|
 | Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures. A test joined for another reason (a `#[Depends]` producer, a registered `expectException()`, a post-condition-customizing class, …) is verified after its finished body, incidentally correct | ✅ verified after the finished body |
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
-| Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
+| Risky check "This test did not perform any assertions" (and its mirror, "…is not expected to perform assertions but performed N assertions") | ⚠️ exact for every test that never yields (the up-front assertion credit is declined once the body is known finished, so PHPUnit reaches the verdict natively, at the right moment) and for every yielding test whose yields counit can observe (`sleep()`/`usleep()` in a namespaced test class, `Counit::sleep()`): those verdicts are emitted at the end of the run through _PHPUnit_'s own risky event — they appear in the risky listing with the right location, count into `Risky: N`, and `--fail-on-risky` exits 1 exactly as in blocking mode. A test resumed at a point counit cannot observe (hooked network/DB IO, a fully-qualified `\sleep()`, a test class in the global namespace) has an untrustworthy per-test tally and is deliberately **not** reported — silence, never a false accusation. `--stop-on-risky` cannot react to a verdict reached after the run, and the deferred verdicts sit at the end of the risky listing | ❌ never flagged |
 | PHPUnit's error/exception-handler snapshot (the "test … did not remove its own exception handlers" risky check) | ❌ the handler stack is snapshotted and restored around `runBare()` — under counit, at the test's first yield — for **every** test: a handler registered after a yield is neither restored nor reported, and leaks into later tests. Covering it would mean joining every test | ❌ same |
 | The "test printed unexpected output" check and JUnit `system-out`, for **post-yield** output of a test that registers no output expectation | ⚠️ exact while `--disallow-test-output` is active — counit then joins every test, so _PHPUnit_ sees the complete output and reports the risky verdict natively; the run serializes for the duration (STDERR notice). Without the option, such a test's post-yield output goes to the terminal in one batch instead of into _PHPUnit_'s buffer — visible, but absent from the unexpected-output annotation and `--log-junit`'s `system-out`. A test leaving its own output buffer open is likewise only reported natively when it is joined | ⚠️ never reported; in the automatic approach the post-yield stray output is swallowed by the coroutine-local buffer rather than printed |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
@@ -549,14 +549,32 @@ faster, with limitations apply. Here is a list of limitations of this package:
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being
   rendered when the test's coroutine first yields:
-  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is not
-    flagged risky under _counit_, while _PHPUnit_ flags it ("This test is not expected to perform assertions but
-    performed 1 assertion"). Run totals stay exact either way, and a *failing* late assertion still fails the run.
+  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is
+    flagged risky ("This test is not expected to perform assertions but performed 1 assertion") through the deferred
+    end-of-run pass described in the risky-check bullet below — provided its yields are observable; one resumed at a
+    point _counit_ cannot observe stays silent. Run totals stay exact either way, and a *failing* late assertion
+    still fails the run.
   * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
     risky occasionally — the per-test attribution caveat above, wearing a different hat.
-* A related behavior note for projects running with `failOnRisky` enabled: a manual-approach test whose wrapped
-  callable throws before its first yield no longer receives the assertion credit, so it may now report "This test did
-  not perform any assertions" under _counit_ — which is exactly what plain _PHPUnit_ was already reporting for it.
+* The risky check "This test did not perform any assertions" works with near-exact _PHPUnit_ semantics. The check is
+  decided from the count _PHPUnit_ reads the moment the test method invocation returns — under _counit_, the body's
+  first yield — and whether the still-running body will assert later is unknowable at that instant; that is why
+  _counit_ credits one assertion up front (suppressing FALSE risky verdicts for post-yield assertions), which used
+  to also suppress every TRUE one. Two mechanisms now restore the true verdicts:
+  * The credit is **declined whenever the body finished before _Counit::create()_ returned** — a never-yielding
+    test's count is already final, so _PHPUnit_ reaches the verdict natively, at the right moment (correct progress
+    marker and listing position, `--stop-on-risky` works). This also covers a body that throws synchronously.
+  * A yielding no-assertion test is reported at the **end of the run through _PHPUnit_'s own risky event** — it
+    appears in the risky listing with the right location, counts into `Risky: N`, and `--fail-on-risky` exits 1
+    exactly as in blocking mode (the event is a real _PHPUnit_ verdict, not a _counit_ notice). A test is only
+    reported when _counit_ can *prove* its count: its coroutine must never have been resumed at a point _counit_
+    cannot observe (hooked network/DB IO, a fully-qualified `\sleep()`, a test class in the global namespace — the
+    same caveat documented for the JUnit per-test counts), because such a test's own tally is an undercount and
+    reporting it would be a false accusation — _counit_'s own CURL sample tests would be flagged. Unprovable cases
+    stay silent; tests _PHPUnit_ already flagged itself, tests that declared they perform no assertions, and tests
+    that errored/skipped/went incomplete — natively or only after their report — are exempt, mirroring blocking
+    _PHPUnit_'s own gates. The deferred verdicts sit at the end of the risky listing, and `--stop-on-risky` cannot
+    react to them. `--do-not-report-useless-tests` disables all of it, as under _PHPUnit_.
 * In the **automatic approach**, _counit_ takes the after-test hooks — _tearDown()_ and _#[After]_ methods — over from
   _PHPUnit_ and runs them inside the test's coroutine, right after the test body finishes, pass or fail. _tearDown()_
   therefore observes a finished test body, exactly as under plain _PHPUnit_ — closing a database connection or

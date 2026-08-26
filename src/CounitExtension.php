@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Deminy\Counit;
 
 use PHPUnit\Event\Code\Test;
+use PHPUnit\Event\Test\ConsideredRisky as TestConsideredRisky;
+use PHPUnit\Event\Test\ConsideredRiskySubscriber as TestConsideredRiskySubscriber;
 use PHPUnit\Event\Test\Errored as TestErrored;
 use PHPUnit\Event\Test\ErroredSubscriber as TestErroredSubscriber;
 use PHPUnit\Event\Test\Failed as TestFailed;
@@ -59,6 +61,7 @@ final class CounitExtension implements Extension
         TimeLimit::initialize($configuration);
         GlobalState::initialize($configuration);
         OutputExpectations::initialize($configuration);
+        UselessTests::initialize($configuration);
 
         if (Helper::isCoroutineFriendly()) {
             if (TimeLimit::enforcedForRun()) {
@@ -137,10 +140,21 @@ final class CounitExtension implements Extension
             // tearDown()/#[After] would be lost for that test, while blocking PHPUnit runs them.
             // All four verdicts runBare() can emit for an aborted preparation are covered; see
             // TestCase::handleAbortedTestPreparation() for the details.
+            // The subscribers also feed UselessTests' exemption bookkeeping: a risky verdict
+            // PHPUnit already reached itself must not be repeated by the deferred pass, and an
+            // errored/skipped/incomplete test is exempt from the no-assertions check upstream.
+            $facade->registerSubscriber(new class implements TestConsideredRiskySubscriber {
+                #[\Override]
+                public function notify(TestConsideredRisky $event): void
+                {
+                    UselessTests::markFlagged($event->test()->id(), $event->message());
+                }
+            });
             $facade->registerSubscriber(new class implements TestErroredSubscriber {
                 #[\Override]
                 public function notify(TestErrored $event): void
                 {
+                    UselessTests::markAborted($event->test()->id());
                     CounitExtension::handleTestVerdict($event->test());
                 }
             });
@@ -155,6 +169,7 @@ final class CounitExtension implements Extension
                 #[\Override]
                 public function notify(TestSkipped $event): void
                 {
+                    UselessTests::markAborted($event->test()->id());
                     CounitExtension::handleTestVerdict($event->test());
                 }
             });
@@ -162,6 +177,7 @@ final class CounitExtension implements Extension
                 #[\Override]
                 public function notify(TestMarkedIncomplete $event): void
                 {
+                    UselessTests::markAborted($event->test()->id());
                     CounitExtension::handleTestVerdict($event->test());
                 }
             });
@@ -180,6 +196,7 @@ final class CounitExtension implements Extension
 
                     Counit::recordEmittedAssertionCount($test->id(), $event->numberOfAssertionsPerformed());
                     Attribution::testFinished($test->id());
+                    UselessTests::record($test);
 
                     if ($test->isTestMethod()) {
                         JunitXmlCorrector::recordTest($test->className(), $test->name(), $test->id());
@@ -242,6 +259,15 @@ final class CounitExtension implements Extension
                     // fully synchronous suites) and miss the late instance counts. The logger only
                     // writes the report when its own ExecutionFinished subscriber runs -- after
                     // this one, since extensions bootstrap before log writers register.
+                    // Emit the "did not perform any assertions" verdicts (and their mirror)
+                    // PHPUnit could not reach on its own, now that every coroutine has drained
+                    // and the per-test tallies are final. The result collector, the risky
+                    // listing, the summary's Risky count and the --fail-on-risky exit code all
+                    // still honor a Test\ConsideredRisky event emitted here, because the
+                    // collector is only read after this subscriber returns. Must run before the
+                    // correction below, which consumes the counter residue.
+                    UselessTests::emitDeferred();
+
                     JunitXmlCorrector::correct();
 
                     $delta = Assert::getCount() - Counit::$creditedAssertionCount + Counit::lateAssertionCount();
