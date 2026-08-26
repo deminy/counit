@@ -338,7 +338,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `tearDown()` / `#[After]` hooks | ✅ run after the finished test body — and still run (natively, with blocking semantics) for a test whose `setUp()` threw or skipped (see notes for two caveats) | ✅ (`@after`) |
 | `markTestSkipped()` / `markTestIncomplete()` **before** the first yield | ✅ | ✅ |
 | Process isolation (`#[RunInSeparateProcess]`, `#[RunTestsInSeparateProcesses]`, `--process-isolation`) | ✅ exact semantics — but no speedup, and each isolated test serializes the run | ✅ (annotations) |
-| `#[Depends]` / `#[DependsExternal]` (incl. deep/shallow clone variants) and `#[DependsOnClass]` | ✅ exact semantics — dependents receive the producer's real return value and are skipped when the producer fails, even after a yield. The producer itself (for `#[DependsOnClass]`: every test of the depended-on class) is run to completion before the run moves on, so it gets no speedup of its own — its dependents could not have overlapped with it anyway, and unrelated tests still do | ❌ (`@depends`) — breaks when the producer yields before finishing |
+| `#[Depends]` / `#[DependsExternal]` (incl. deep/shallow clone variants) and `#[DependsOnClass]` | ✅ exact semantics — dependents receive the producer's real return value and are skipped when the producer fails, even after a yield. The producer itself (for `#[DependsOnClass]`: every test of the depended-on class) is run to completion before the run moves on, so it gets no speedup of its own — its dependents could not have overlapped with it anyway, and unrelated tests still do | ✅ (`@depends`, incl. `clone`/`shallowClone` and cross-class `Class::method` targets) — same producer-join fix; there, the manual approach's `Counit::create()` even joins producers automatically. `@depends Class::class` requires PHPUnit >= 9.3 (upstream limitation) |
 | Test selection: `--filter`, `--testsuite`, `--group` / `#[Group]`, `--exclude-group` | ✅ | ✅ |
 | `#[Requires*]` preconditions | ✅ | ✅ (`@requires`) |
 | `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
@@ -410,7 +410,9 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * In the manual approach, a producer computing its return value inside _Counit::create()_ still loses it (the
     callable's result is only available if it finishes before its first yield). Use _Counit::createAndJoin()_ instead
     for such producers: it runs the callable in a coroutine, waits for it, and returns its value / rethrows its
-    failure — while other tests' coroutines keep running.
+    failure — while other tests' coroutines keep running. (On the 0.2.x line, _Counit::create()_ itself joins such
+    producers when called directly from the depended-on test method, so the usual by-ref shape works with no test
+    changes; _Counit::createAndJoin()_ exists there as well.)
   * A producer with a data provider passes _NULL_ to its dependents — under plain _PHPUnit_ too (it refuses to record
     return values for data-provider tests); this is upstream behavior, not a _counit_ limitation.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
