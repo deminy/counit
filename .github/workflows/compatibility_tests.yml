@@ -40,7 +40,7 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (52 tests, 59 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (59 tests, 72 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot change the test's status
@@ -139,6 +139,30 @@ jobs:
           fi
           # In neither mode may the skip be honored as a skip.
           ! grep -qF 'Skipped:' /tmp/teardown-skip.log
+
+      - name: Test Exception Expectation Semantics
+        # A test whose expected exception is thrown only after a yield used to fail prematurely
+        # with "exception not thrown" (PHPUnit verifies the expectation as soon as
+        # invokeTestMethod() returns -- the body's first yield), with the real Throwable arriving
+        # as a deferred duplicate. counit now joins the coroutine of a test that has an exception
+        # expectation registered at its first yield, so PHPUnit verifies natively: a mismatch
+        # fails with the real comparison message, a never-arriving exception fails natively after
+        # the finished body, and a tearDown() throwing the very class the test expects ERRORS the
+        # test (the joined test's hooks run natively, strictly after the verification) instead of
+        # falsely satisfying the expectation. Identical with and without Swoole; the passing
+        # shapes live in the exact-summary-gated suite above.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/ExceptionFailureTest.php > /tmp/exception-fail.log 2> /tmp/exception-fail.err || rc=$?
+          cat /tmp/exception-fail.log /tmp/exception-fail.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 4, Assertions: 4, Errors: 1, Failures: 2.' /tmp/exception-fail.log
+          # The real, native failure/error classifications ...
+          grep -qF 'Failed asserting that exception of type "LogicException" matches expected exception "RuntimeException"' /tmp/exception-fail.log
+          grep -qF 'Failed asserting that exception of type "RuntimeException" is thrown.' /tmp/exception-fail.log
+          grep -qF 'deliberate tearDown() throw of the very class the test expects' /tmp/exception-fail.log
+          # ... and nothing may surface as a deferred end-of-run failure.
+          ! grep -qF 'already been reported as passed' /tmp/exception-fail.err
 
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the

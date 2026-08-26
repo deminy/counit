@@ -331,7 +331,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Assertions (`assert*()`); the run's reported **total** | ✅ exact | ✅ exact |
 | `#[DataProvider]` / `#[TestWith]` | ✅ (providers themselves run serialized, at collection time) | ✅ (`@dataProvider`) |
 | `#[DoesNotPerformAssertions]`; `expectNotToPerformAssertions()` in `setUp()` or at the top of the test body | ✅ (method and class level) | ✅ (`@doesNotPerformAssertions`; method level only — _PHPUnit_ 8/9 itself ignores the class-level annotation) |
-| `expectException()` and friends, exception thrown **before** the first yield | ✅ | ✅ |
+| `expectException()` and friends (message/code/object variants included) | ✅ exact — a test with a registered expectation is joined at its first yield, so PHPUnit verifies the real Throwable natively: match, mismatch, and never-thrown all report as in blocking mode, in both approaches. The expectation must be declared before the first yield (one declared only after it is invisible at the join decision and keeps the old premature-failure behavior) | ✅ before the first yield. After one, the automatic approach verifies natively inside the coroutine — a matching throw is exact, while mismatch/never-thrown surface via the deferred end-of-run block with a non-zero exit code — and the manual approach fails prematurely with a deferred duplicate |
 | Stubs (`createStub()`, `createMock()` + `willReturn()` etc., no `expects()`) | ✅ | ✅ |
 | Mock `->expects(...)` **satisfied before** the first yield | ✅ | ✅ |
 | `setUp()`, `assertPreConditions()`, `setUpBeforeClass()`, `tearDownAfterClass()` | ✅ (run outside the coroutines: serialized, no speedup) | ✅ — but `setUp()` and `assertPreConditions()` run *inside* the test's coroutine there (concurrent, with speedup); only the class-level hooks are serialized. A `setUp()` that aborts after its own yield falls into the deferred post-yield reporting |
@@ -350,7 +350,6 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Feature | Counit 1.x | Counit 0.x (reference) |
 |---|---|---|
 | Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures | ✅ verified after the finished body |
-| `expectException()` where the throw happens **after** a yield | ❌ the test fails "exception not thrown", and the exception resurfaces as a deferred failure | ❌ |
 | `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
@@ -415,6 +414,23 @@ faster, with limitations apply. Here is a list of limitations of this package:
     changes; _Counit::createAndJoin()_ exists there as well.)
   * A producer with a data provider passes _NULL_ to its dependents — under plain _PHPUnit_ too (it refuses to record
     return values for data-provider tests); this is upstream behavior, not a _counit_ limitation.
+* Method _expectException()_ and its friends work with exact _PHPUnit_ semantics even when the expected exception is
+  thrown only after the test's first sleep/IO yield. _PHPUnit_ verifies the expectation the moment the test method
+  invocation returns — under _counit_, the body's first yield: too early, so such tests used to fail with "exception
+  not thrown" while the real Throwable could only be reported in the deferred end-of-run block. Since the expectation
+  is declared inside the body (it does not exist yet when the coroutine starts), _counit_ checks for a registered
+  expectation once the body reaches its first yield and then *joins* the coroutine — the same mechanism as for a
+  _#[Depends]_ producer: the real Throwable is rethrown synchronously into _PHPUnit_'s native verification, no
+  assertion credit is applied (the verification counts its own assertions), and the test's after-test hooks are
+  handed back to _PHPUnit_'s native invocation — which also guarantees that a _tearDown()_ throwing the very class
+  the test expects errors the test instead of falsely satisfying the expectation. Notes:
+  * Only expectation-carrying tests that yield lose their own concurrency; every other test still overlaps with
+    them, including while they wait.
+  * An expectation declared only **after** the test's first yield is invisible at the join decision and keeps the
+    old behavior; declare expectations before the first sleep/IO call (the overwhelmingly common shape).
+  * The detection reads _PHPUnit_'s internal expectation state (kept in two different shapes across PHPUnit 12.5
+    and 13); should a future _PHPUnit_ release change it, _counit_ prints a notice once and degrades to the
+    previous behavior — loud, never silent.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being

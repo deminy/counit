@@ -49,6 +49,25 @@ Two release series are maintained in parallel: the **1.0.x** series targets PHPU
   semantics to manual-approach producers. (A producer using a data provider still passes `NULL` — plain PHPUnit
   refuses to record return values for those; upstream behavior.)
 
+- **`expectException()` and friends now work when the expected exception is thrown only after a yield.** PHPUnit
+  verifies an exception expectation the moment the test-method invocation returns — under counit, the body's first
+  yield: too early, so such a test failed prematurely with "exception ... is thrown" while the real Throwable arrived
+  later and could only be reported as a deferred end-of-run duplicate (with the wrong failure text even for a throw
+  that would have matched). Because the expectation is declared inside the body — it does not exist yet when the
+  coroutine is spawned — `Counit::create()` now checks for a registered expectation once the body has run to its
+  first yield and, finding one, *joins* the coroutine (the `#[Depends]` producer mechanism reapplied): the real
+  Throwable is rethrown synchronously into PHPUnit's native verification, so match, mismatch, and never-thrown all
+  report exactly as in blocking mode, for every expectation flavor (message/code/messageMatches/exceptionObject) and
+  in both approaches — the manual approach needs no test changes, since its expectations are declared before
+  `Counit::create()` is even called. No assertion credit is applied on the join path (the verification counts its
+  own assertions natively), and a joined test's after-test hooks are handed back to PHPUnit's native invocation —
+  which runs strictly after the verification, guaranteeing a `tearDown()` throwing the very class the test expects
+  errors the test instead of falsely satisfying the expectation. Only expectation-carrying tests that yield lose
+  their own concurrency. The expectation detection reads PHPUnit's internal state (kept in two different shapes
+  across PHPUnit 12.5 and 13, both covered); on any future internals change counit prints a once-per-run notice and
+  degrades to the previous behavior. Remaining limitation (documented): an expectation declared only after the
+  test's first yield is invisible at the join decision and keeps the old behavior.
+
 ### Bug fixes
 
 - **Correct the assertion counts in the JUnit XML report.** The report's per-testcase `assertions` attributes are

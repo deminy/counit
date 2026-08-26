@@ -212,7 +212,13 @@ class TestCase extends BaseTestCase
                 });
             }
 
-            Counit::create(function () use ($methodName, $testArguments): void {
+            // Set by the join callback below when this test turns out to carry an exception
+            // expectation: its body then runs to completion inside invokeTestMethod(), so
+            // PHPUnit's own after-test hook timing is correct again and the hooks are handed back
+            // to the native invocation -- exactly as for a joined #[Depends] producer.
+            $useNativeAfterHooks = false;
+
+            Counit::create(function () use ($methodName, $testArguments, &$useNativeAfterHooks): void {
                 try {
                     parent::invokeTestMethod($methodName, $testArguments);
                 } finally {
@@ -226,10 +232,18 @@ class TestCase extends BaseTestCase
                     } finally {
                         // The relocated tearDown()/#[After] hooks run last, even when the body or
                         // tearDownCoroutine() threw -- the same guarantee PHPUnit itself gives.
-                        $this->invokeRelocatedAfterTestHooks();
+                        // Skipped when the hooks were handed back to PHPUnit for this test (see
+                        // $useNativeAfterHooks), so they can never run twice.
+                        // Flipped by reference from the join callback below, before this
+                        // coroutine can resume -- invisible to PHPStan.
+                        if (!$useNativeAfterHooks) { // @phpstan-ignore booleanNot.alwaysTrue
+                            $this->invokeRelocatedAfterTestHooks();
+                        }
                     }
                 }
-            }, 1);
+            }, 1, function () use (&$useNativeAfterHooks): void {
+                $useNativeAfterHooks = self::setAfterTestHookSuppression(false, static::class);
+            });
 
             return null;
         }

@@ -104,11 +104,18 @@ class Counit
      * @param int $count an optional parameter to suppress warning message "This test did not perform any assertions",
      *                   and to make the counters match. The credit is a request: it is declined for a test that
      *                   declares -- through #[DoesNotPerformAssertions] or expectNotToPerformAssertions() -- that it
-     *                   performs no assertions, since PHPUnit would otherwise report the credited test as risky.
-     * @return int return 0 if not running inside a coroutine; otherwise, return the coroutine ID, or -1 when failed
-     *             creating a new coroutine to run the tests
+     *                   performs no assertions, since PHPUnit would otherwise report the credited test as risky --
+     *                   and it is not applied at all when the coroutine is joined because the calling test carries
+     *                   an exception expectation (see below), since PHPUnit then reads the real, final count.
+     * @param callable|null $onJoin counit-internal: invoked -- on the calling coroutine, before the wrapped callable
+     *                              can resume -- when the coroutine is about to be joined because the calling test
+     *                              carries an exception expectation. TestCase::invokeTestMethod() uses it to hand
+     *                              the after-test hooks back to PHPUnit for that test.
+     * @return int return 0 if not running inside a coroutine, or when the coroutine was joined (run to completion
+     *             before returning) because the calling test carries an exception expectation; otherwise, return
+     *             the coroutine ID, or -1 when failed creating a new coroutine to run the tests
      */
-    public static function create(callable $callable, int $count = 0): int
+    public static function create(callable $callable, int $count = 0, ?callable $onJoin = null): int
     {
         if (Helper::isCoroutineFriendly()) {
             $trace  = debug_backtrace();
@@ -125,9 +132,12 @@ class Counit
 
             $caught          = null;
             $alreadyReturned = false;
+            $joining         = false;
+            $thrown          = null;
+            $done            = new Coroutine\Channel(1);
             $testId          = $caller instanceof TestCase ? $caller->valueObjectForEvents()->id() : null;
 
-            $id = Coroutine::create(function () use ($callable, $caller, $testId, &$caught, &$alreadyReturned, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, $testId, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, $description): void {
                 Attribution::coroutineStarted($testId);
 
                 try {
@@ -137,7 +147,12 @@ class Counit
                     // created; it is flipped to true (by reference) below, before a coroutine
                     // that yielded resumes and can reach this catch block.
                     if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
-                        if (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
+                        if ($joining) { // @phpstan-ignore if.alwaysFalse
+                            // The caller is waiting for this coroutine (see the join below): hand
+                            // the Throwable over instead of deferring it, so it reaches PHPUnit
+                            // synchronously and its native handling applies.
+                            $thrown = $e;
+                        } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
                         } else {
                             self::$deferredFailures[$description] = $e;
@@ -167,6 +182,7 @@ class Counit
                     }
 
                     Attribution::coroutineFinished();
+                    $done->push(true);
                 }
             });
             $alreadyReturned = true;
@@ -186,6 +202,33 @@ class Counit
             // expectNotToPerformAssertions() call at the top of the test body itself. It also means
             // a callable that threw synchronously above is never credited, which matches blocking
             // mode: PHPUnit does not count assertions a test never got to perform.
+            // A test with a registered exception expectation cannot be allowed to merely start
+            // here: PHPUnit verifies the expectation in runTest(), right after invokeTestMethod()
+            // returns -- so with the body still in flight it sees no Throwable and fails the test
+            // with "exception ... is thrown", while the real Throwable arrives later and can only
+            // be deferred. Joining the coroutine puts the Throwable back where PHPUnit expects it.
+            // The check happens here rather than before the spawn on purpose: expectException()
+            // is called inside the body, so the expectation only exists once the body has run to
+            // its first yield. No assertion credit is applied on this path -- the expectation
+            // verification counts its own assertions natively, before PHPUnit reads the count.
+            if ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller)) {
+                if ($onJoin !== null) {
+                    $onJoin();
+                }
+
+                $joining = true;
+                Attribution::suspended();
+                $done->pop();
+                Attribution::resumed();
+
+                // Set by reference from inside the coroutine, which PHPStan cannot see.
+                if ($thrown !== null) { // @phpstan-ignore notIdentical.alwaysFalse
+                    throw $thrown;
+                }
+
+                return 0;
+            }
+
             self::creditCaller($caller, $count);
 
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
