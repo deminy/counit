@@ -336,6 +336,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Mock `->expects(...)` **satisfied before** the first yield | ✅ | ✅ |
 | `setUp()`, `assertPreConditions()`, `setUpBeforeClass()`, `tearDownAfterClass()` | ✅ (run outside the coroutines: serialized, no speedup) | ✅ — but `setUp()` and `assertPreConditions()` run *inside* the test's coroutine there (concurrent, with speedup); only the class-level hooks are serialized. A `setUp()` that aborts after its own yield falls into the deferred post-yield reporting |
 | `tearDown()` / `#[After]` hooks | ✅ run after the finished test body — and still run (natively, with blocking semantics) for a test whose `setUp()` threw or skipped (see notes for two caveats) | ✅ (`@after`) — fully native inside the coroutine, including when `setUp()` aborted |
+| `assertPostConditions()` and `#[PostCondition]` hook methods | ✅ exact — a test class customizing the post-condition phase (an overridden `assertPostConditions()`, or any `#[PostCondition]` method) has every one of its tests joined at the first yield, so _PHPUnit_ runs the phase after the finished body and a throwing hook fails/errors/skips the test natively, in both approaches; the phase is skipped when the body failed, even after a yield. Such a class's tests get no concurrency of their own — and, like every joined test, are flagged risky when they perform no assertions, exactly as in blocking mode — while every other test still overlaps with them. A class customizing nothing is untouched: _PHPUnit_ skips the empty default hook, so counit does not join | ⚠️ the automatic approach was always correct there, with full concurrency kept (the whole `runBare()` runs inside the coroutine, so the phase follows the finished body); the manual approach has the mistiming _Counit_ 1.x fixed by joining — not yet ported (`@postCondition` annotations included) |
 | `markTestSkipped()` / `markTestIncomplete()` **before** the first yield | ✅ | ✅ |
 | Process isolation (`#[RunInSeparateProcess]`, `#[RunTestsInSeparateProcesses]`, `--process-isolation`) | ✅ exact semantics — but no speedup, and each isolated test serializes the run | ✅ (annotations) |
 | `#[Depends]` / `#[DependsExternal]` (incl. deep/shallow clone variants) and `#[DependsOnClass]` | ✅ exact semantics — dependents receive the producer's real return value and are skipped when the producer fails, even after a yield. The producer itself (for `#[DependsOnClass]`: every test of the depended-on class) is run to completion before the run moves on, so it gets no speedup of its own — its dependents could not have overlapped with it anyway, and unrelated tests still do | ✅ (`@depends`, incl. `clone`/`shallowClone` and cross-class `Class::method` targets) — same producer-join fix; there, the manual approach's `Counit::create()` even joins producers automatically. `@depends Class::class` requires PHPUnit >= 9.3 (upstream limitation) |
@@ -351,12 +352,11 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 
 | Feature | Counit 1.x | Counit 0.x (reference) |
 |---|---|---|
-| Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures | ✅ verified after the finished body |
+| Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures. A test joined for another reason (a `#[Depends]` producer, a registered `expectException()`, a post-condition-customizing class, …) is verified after its finished body, incidentally correct | ✅ verified after the finished body |
 | `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
 | PHPUnit's error/exception-handler snapshot (the "test … did not remove its own exception handlers" risky check) | ❌ the handler stack is snapshotted and restored around `runBare()` — under counit, at the test's first yield — for **every** test: a handler registered after a yield is neither restored nor reported, and leaks into later tests. Covering it would mean joining every test | ❌ same |
-| `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished — except on a joined `#[Depends]` producer, whose whole after-test phase is PHPUnit's own | ✅ runs after the finished body |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
 | A `tearDown()` / `#[After]` hook that throws or skips | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error; a skip signalled from such a hook — a test **failure** under blocking _PHPUnit_, never a skip — is reported the same way. Fully native semantics apply on a joined `#[Depends]` producer and on a test whose `setUp()` threw or skipped (their hooks run natively) | ⚠️ a hook throw after a yield lands in the deferred block (before one, it errors the test natively); a hook **skip** is a genuine skip on _PHPUnit_ 8/9 — upstream semantics, exit code 0 — and 0.x honors it: natively before a yield, via the benign end-of-run notice after one. Joined producers' hooks are fully native there too |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
@@ -403,7 +403,8 @@ faster, with limitations apply. Here is a list of limitations of this package:
     with the body complete inside _invokeTestMethod()_, the native timing is correct again — so a throwing
     _tearDown()_ errors the producer exactly as under blocking _PHPUnit_ (and skips its dependents), instead of
     surfacing in the deferred end-of-run block as it does for non-joined tests. The same goes for the producer's
-    whole after-test phase, `assertPostConditions()` included. _tearDownCoroutine()_ stays counit-owned and is not
+    whole after-test phase — including `assertPostConditions()`, which every class customizing it now gets correct
+    for all of its tests, joined or not (see its own bullet below). _tearDownCoroutine()_ stays counit-owned and is not
     part of this hand-back: it still runs inside the coroutine right after the body — for a joined producer its
     failure is always attributed to the body path (the join runs to completion, so the before/after-first-yield
     split documented for non-joined tests does not arise).
@@ -496,6 +497,27 @@ faster, with limitations apply. Here is a list of limitations of this package:
     own row in the incompatible-features table.
   * A process-isolated test needs none of this and never did: isolation skips the snapshot machinery entirely (the
     child process's mutations die with it), and `#[WithEnvironmentVariable]` still applies inside the child.
+* Method _assertPostConditions()_ and _#[PostCondition]_ hook methods work with exact _PHPUnit_ semantics — at the
+  price of the customizing class's concurrency. _PHPUnit_ runs the post-condition phase from _runBare()_, immediately
+  after the test method invocation returns — under _counit_, the body's first yield: the hooks used to inspect the
+  test while its body was still in flight (failing loudly, or passing vacuously against pre-body state), and they ran
+  even for a body that failed only after a yield, where blocking _PHPUnit_ skips the phase entirely. The hooks cannot
+  be relocated into the coroutine the way _tearDown()_ is: _PHPUnit_ derives the test's verdict from whether they
+  threw, so a relocated failure could only ever be deferred to the end of the run instead of failing the test. So a
+  test class that customizes the phase — an overridden _assertPostConditions()_ (in a parent class too), or any
+  method carrying _#[PostCondition]_ — has every one of its tests *joined* at the first yield (the
+  _#[Depends]_-producer mechanism): the phase follows the truly finished body, is skipped when the body failed, and a
+  throwing hook fails/errors/skips the test natively. Notes:
+  * Only the customizing class's tests lose their own concurrency; every other test still overlaps with them,
+    including while they wait. A class customizing nothing — the overwhelming majority — is completely unaffected:
+    _PHPUnit_'s own hook invoker skips the empty default method, so _counit_ does not join. (An *empty* override
+    still joins — proving emptiness by reflection is not worth it.)
+  * As on every join path, no assertion credit is applied: a customizing test performing no assertions is flagged
+    risky, exactly as under blocking _PHPUnit_.
+  * `assertPreConditions()` / `#[PreCondition]` need no handling at all: _PHPUnit_ invokes them before the test
+    method — i.e. before the test's coroutine exists (see the setup-hooks row above).
+  * In the manual approach, the detection is caller-based like the _expectException()_ one: a _Counit::create()_
+    call made from a helper object rather than the test method itself is not joined.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being

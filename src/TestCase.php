@@ -245,9 +245,16 @@ class TestCase extends BaseTestCase
             // hooks. The other half of that support, draining all in-flight coroutines BEFORE
             // the snapshot, lives in CounitExtension's PreparationStarted subscriber; see
             // GlobalState for the whole design.
+            // A test class that customizes PHPUnit's post-condition phase -- an overridden
+            // assertPostConditions(), or any #[PostCondition] method -- has every one of its
+            // tests joined as well: runBare() invokes those hooks right after this method
+            // returns, so without the join they would inspect the test while its body is still
+            // in flight, and a throwing hook could not fail the test natively. See
+            // PostConditions.
             if (DependencyMap::isProducer(static::class, $this->name())
                 || TimeLimit::enforcedForRun()
-                || GlobalState::isBackedUp(static::class, $this->name())) {
+                || GlobalState::isBackedUp(static::class, $this->name())
+                || PostConditions::isCustomizedFor(static::class)) {
                 // The body will have fully run before this method returns, so PHPUnit's own
                 // after-test hook timing is correct again for this one test: hand the hooks back
                 // to the native invocation, which also restores its exact error semantics -- a

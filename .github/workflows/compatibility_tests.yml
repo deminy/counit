@@ -258,6 +258,49 @@ jobs:
           grep -qF 'Tests: 2, Assertions: 4, Risky: 1.' /tmp/backup-strict.log
           grep -qF 'This test modified global state but was not expected to do so' /tmp/backup-strict.log
 
+      - name: Test Post-Condition Hooks
+        # PHPUnit runs the post-condition phase (assertPostConditions() and #[PostCondition]
+        # methods) from runBare(), right after the test method invocation returns -- under counit,
+        # the test body's first yield -- so a customized hook used to inspect the test while its
+        # body was still in flight, and it ran even when the body failed only after a yield
+        # (blocking PHPUnit skips the phase for a failed body). counit now detects a class that
+        # customizes the phase by reflection and joins every one of its tests, so the phase runs
+        # after the finished body and a throwing hook fails/errors/skips the test natively. Since
+        # joined tests get no assertion credit, a customizing test performing no assertions is
+        # risky again, exactly as under blocking PHPUnit (the Risky target); the Skip target pins
+        # the skip-on-failure half: the post-yield body failure is native (not deferred) and the
+        # hook must not have run. The expected output is identical with and without Swoole.
+        run: |
+          for target in PostConditionsTest PostConditionsManualTest PostConditionAttributeTest PostConditionsRiskyTest PostConditionsSkipTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/postcond.log 2> /tmp/postcond.err || rc=$?
+            cat /tmp/postcond.log /tmp/postcond.err
+            # Nothing may surface as a deferred end-of-run failure.
+            ! grep -qF 'already been reported as passed' /tmp/postcond.err
+            case "$target" in
+              PostConditionsTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (2 tests, 4 assertions)' /tmp/postcond.log ;;
+              PostConditionsManualTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (2 tests, 4 assertions)' /tmp/postcond.log ;;
+              PostConditionAttributeTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (1 test, 2 assertions)' /tmp/postcond.log ;;
+              PostConditionsRiskyTest)
+                test "$rc" -eq 0
+                grep -qF 'Tests: 1, Assertions: 0, Risky: 1.' /tmp/postcond.log
+                grep -qF 'This test did not perform any assertions' /tmp/postcond.log ;;
+              PostConditionsSkipTest)
+                test "$rc" -eq 1
+                grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/postcond.log
+                # The test fails natively with the BODY's message; the post-condition hook
+                # must never have run for the failed body.
+                grep -qF 'late failure' /tmp/postcond.log
+                ! grep -qF 'post-conditions must not run' /tmp/postcond.log ;;
+            esac
+          done
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

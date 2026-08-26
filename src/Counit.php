@@ -230,9 +230,16 @@ class Counit
             // creditCaller()) -- the joined body's real assertions are counted natively before
             // PHPUnit reads them, so a backed-up test performing no assertions stays risky,
             // exactly as in blocking mode.
+            // A manual-approach test whose class customizes PHPUnit's post-condition phase (an
+            // overridden assertPostConditions(), or a #[PostCondition] method) joins for the
+            // same reason: runBare() invokes those hooks right after runTest() returns, and a
+            // throwing hook must fail/error the test natively -- which it only can when the body
+            // has truly finished. Again no credit is applied. See PostConditions.
             if (TimeLimit::enforcedForRun()
                 || ($caller instanceof TestCase
-                    && (ExceptionExpectations::isRegisteredFor($caller) || GlobalState::isBackedUp($caller::class, $caller->name())))) {
+                    && (ExceptionExpectations::isRegisteredFor($caller)
+                        || GlobalState::isBackedUp($caller::class, $caller->name())
+                        || PostConditions::isCustomizedFor($caller::class)))) {
                 if ($onJoin !== null) {
                     $onJoin();
                 }
