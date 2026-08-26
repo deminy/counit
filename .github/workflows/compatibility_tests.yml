@@ -43,7 +43,7 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (26 tests, 31 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (42 tests, 47 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot change the test's status
@@ -64,6 +64,45 @@ jobs:
             grep -qF 'LateSkipTest::testIncompleteAfterYield' /tmp/late-skip.err
           else
             grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
+          fi
+
+      - name: Test Depends Failure Semantics
+        # A producer failing only after a yield used to be recorded as passed at that yield: its
+        # failure was deferred to an end-of-run notice and its dependent ran anyway, with a NULL
+        # input. With the producer's coroutine joined, the failure lands inside runBare() like in
+        # blocking mode: a real Failure, the dependent Skipped, exit code 1, and no deferred
+        # failure block. The expected output is identical with and without Swoole. These cannot
+        # live in the exact-summary-gated suite above, since the runs are expected to fail (or
+        # report risky). The whole-class dependency form is exercised only where PHPUnit supports
+        # it upstream (>= 9.3, where ExecutionOrderDependency exists) -- older versions warn that
+        # the target does not exist, in blocking mode too.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsFailureTest.php > /tmp/depends-fail.log 2> /tmp/depends-fail.err || rc=$?
+          cat /tmp/depends-fail.log /tmp/depends-fail.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/depends-fail.log
+          # The dependent must not have run (its body fails loudly if it does) ...
+          ! grep -qF 'the dependent of a failed producer must be skipped' /tmp/depends-fail.log
+          # ... and the producer's failure must be a real one, not a deferred end-of-run notice.
+          ! grep -qF 'already been reported as passed' /tmp/depends-fail.err
+          # A joined producer that performs no assertions must stay risky -- the join path applies
+          # no up-front assertion credit -- so its dependent is skipped; risky alone keeps the
+          # exit code at 0, exactly as under PHPUnit.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsRiskyProducerTest.php > /tmp/depends-risky.log 2> /tmp/depends-risky.err || rc=$?
+          cat /tmp/depends-risky.log /tmp/depends-risky.err
+          test "$rc" -eq 0
+          grep -qF 'Tests: 2, Assertions: 0, Skipped: 1, Risky: 1.' /tmp/depends-risky.log
+          ! grep -qF 'the dependent of a risky producer must be skipped' /tmp/depends-risky.log
+          if php -r 'exit(class_exists("PHPUnit\\Framework\\ExecutionOrderDependency") ? 0 : 1);'; then
+            rc=0
+            ./counit -c phpunit.xml.dist tests/regression/depends-on-class > /tmp/depends-class.log 2> /tmp/depends-class.err || rc=$?
+            cat /tmp/depends-class.log /tmp/depends-class.err
+            test "$rc" -eq 1
+            grep -qF 'Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/depends-class.log
+            ! grep -qF 'the dependent of a not-fully-passed class must be skipped' /tmp/depends-class.log
+            ! grep -qF 'already been reported as passed' /tmp/depends-class.err
           fi
 
       - name: Test JUnit XML Assertion Counts

@@ -87,14 +87,35 @@ class Counit
      *                   declares -- through the annotation @doesNotPerformAssertions or a call to method
      *                   expectNotToPerformAssertions() -- that it performs no assertions, since PHPUnit would
      *                   otherwise report the credited test as risky.
-     * @return int return 0 if not running inside a coroutine; otherwise, return the coroutine ID, or -1 when failed
-     *             creating a new coroutine to run the tests
+     * @return int return 0 if not running inside a coroutine, or when the callable was joined (run
+     *             to completion before returning) because something @depends on the calling test;
+     *             otherwise, return the coroutine ID, or -1 when failed creating a new coroutine
+     *             to run the tests
      */
     public static function create(callable $callable, int $count = 0): int
     {
         if (Helper::isCoroutineFriendly()) {
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
+            $method = isset($trace[1]['function']) ? (string) $trace[1]['function'] : '';
+
+            // A test something @depends on cannot be allowed to merely start its coroutine here:
+            // PHPUnit records the test's return value and verdict when its runBare() returns and
+            // resolves each dependent's input from there, before any counit seam (see
+            // DependencyMap). Joining makes the idiomatic manual-approach shape -- compute into a
+            // by-ref variable inside the callable, return it from the test method -- deliver the
+            // real value, and a failure after a yield reach PHPUnit synchronously, with no test
+            // changes. (Detection needs the create() call to sit directly in the test method; a
+            // call made from a helper starts an ordinary coroutine.) No assertion credit is
+            // applied on this path even when requested: the body completes before PHPUnit reads
+            // the count, so the real assertions are counted -- crediting on top would both
+            // inflate the count and stop a producer that performs no assertions from being
+            // flagged risky, which is what makes PHPUnit skip its dependents in blocking mode.
+            if ($caller instanceof TestCase && $method !== '' && DependencyMap::isProducer(get_class($caller), $method)) {
+                self::createAndJoin($callable);
+
+                return 0;
+            }
 
             if ($caller instanceof TestCase) {
                 $testResult = $caller->getTestResultObject();
@@ -170,6 +191,85 @@ class Counit
 
         $callable();
         return 0;
+    }
+
+    /**
+     * Runs the callable in its own coroutine and *waits* for it: returns its return value, or
+     * rethrows what it threw -- never deferring the failure. Other tests' pending coroutines keep
+     * running while this one is awaited (the wait itself yields to the scheduler).
+     * TestCase::runBare() uses this for every automatic-approach test something @depends on, and
+     * Counit::create() delegates here for manual-approach producers; a manual-approach producer
+     * can also call it directly, in which case its return value can be returned from the test
+     * method as-is.
+     *
+     * No assertion credit is applied: the body is complete before PHPUnit reads the count, so the
+     * real assertions are counted -- exactly as in blocking mode.
+     *
+     * @return mixed the callable's return value
+     */
+    public static function createAndJoin(callable $callable)
+    {
+        if (!Helper::isCoroutineFriendly()) {
+            return $callable();
+        }
+
+        // The nearest TestCase frame is the test being joined. It is not always the direct caller:
+        // when create() delegates here for a manual-approach producer, the direct caller is that
+        // static create() frame, and the test object sits one frame further out.
+        $caller = null;
+        foreach (debug_backtrace() as $frame) {
+            if (isset($frame['object']) && $frame['object'] instanceof TestCase) {
+                $caller = $frame['object'];
+
+                break;
+            }
+        }
+
+        if ($caller instanceof TestCase) {
+            $testResult = $caller->getTestResultObject();
+            if ($testResult !== null) {
+                // Same bookkeeping as create(); see the comments there.
+                self::$testResult = $testResult;
+                AssertionCountListener::attach($testResult);
+            }
+        }
+
+        $key = ($caller instanceof TestCase) ? spl_object_id($caller) : null;
+        if ($key !== null) {
+            Attribution::claimMain($key);
+        }
+
+        $done   = new Coroutine\Channel(1);
+        $result = null;
+        $thrown = null;
+
+        Coroutine::create(function () use ($callable, $key, $done, &$result, &$thrown): void {
+            Attribution::coroutineStarted($key);
+
+            try {
+                $result = $callable();
+            } catch (\Throwable $e) {
+                $thrown = $e;
+            } finally {
+                Attribution::coroutineFinished();
+                $done->push(true);
+            }
+        });
+
+        // The pop() below blocks the current coroutine until the joined one pushes -- Swoole
+        // resumes other pending coroutines in the meantime, so only this one test runs at its
+        // blocking-mode pace. The Attribution brackets keep the assertion-counter segments
+        // attributed correctly across the switch.
+        Attribution::resumed();
+        Attribution::suspended();
+        $done->pop();
+        Attribution::resumed();
+
+        if ($thrown !== null) {
+            throw $thrown;
+        }
+
+        return $result;
     }
 
     /**

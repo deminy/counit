@@ -50,6 +50,27 @@ class TestCase extends BaseTestCase
     public function runBare(): void
     {
         if (Helper::isCoroutineFriendly()) {
+            // A test something @depends on cannot be allowed to merely start here: PHPUnit
+            // records its return value and verdict when runBare() returns -- under counit, the
+            // body's first yield -- and resolves each dependent's input from there, before any
+            // counit seam (see DependencyMap). So a producer's coroutine is joined:
+            // parent::runBare() runs to true completion inside the coroutine -- its own error
+            // handling, tearDown() included, all with native semantics -- and a Throwable it
+            // rethrows reaches TestResult::run() synchronously, so a producer that only fails
+            // after a yield skips its dependents exactly as in blocking mode. No assertion
+            // credit is applied (see below): PHPUnit reads the real, final count, and crediting
+            // would stop a producer that performs no assertions from being flagged risky --
+            // which is what makes PHPUnit skip its dependents in blocking mode. It costs that
+            // one test its own concurrency; every other test still overlaps with it, including
+            // while it waits.
+            if (DependencyMap::isProducer(static::class, $this->getName(false))) {
+                Counit::createAndJoin(function (): void {
+                    parent::runBare();
+                });
+
+                return;
+            }
+
             Counit::create(function () {
                 parent::runBare();
             });

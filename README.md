@@ -236,6 +236,12 @@ The 2nd parameter is a request rather than a command: for a test that declares i
 annotation _@doesNotPerformAssertions_ or method _expectNotToPerformAssertions()_), _Counit::create()_ declines the
 credit — crediting such a test would make _PHPUnit_ report it as risky.
 
+When another test declares _@depends_ on a manual-approach test, _Counit::create()_ — called directly from that test
+method — joins the coroutine instead of merely starting it: the callback runs to completion (other tests keep running
+in the meantime), so a value computed inside it can be returned from the test method and reaches the dependents for
+real. Alternatively, _Counit::createAndJoin()_ returns the callback's value (and rethrows its failure) directly. See
+[Additional Notes](#additional-notes).
+
 To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
@@ -339,6 +345,24 @@ faster, with limitations apply. Here is a list of limitations of this package:
     it).
   * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
     method-level annotation is honored), with or without _counit_.
+* Annotation _@depends_ (same-class, cross-class `Class::method`, and the `clone`/`shallowClone` options) works with
+  exact _PHPUnit_ semantics in both approaches. _PHPUnit_ records a test's return value and verdict when its
+  _runBare()_ returns — under _counit_, the coroutine's first yield: too early for either to be real. So when
+  anything in the run depends on a test (_counit_ builds the reverse dependency graph up front, from _PHPUnit_'s own
+  metadata), that test's coroutine is *joined*: it runs to true completion — _tearDown()_, error handling and all,
+  with native semantics — before the run moves on. Dependents therefore receive the actual return value and are
+  skipped when a producer fails (or turns out risky), even when that happens only after a yield. The joined producer
+  gets no speedup of its own — its dependents could never have overlapped with it anyway — while every unrelated
+  test still overlaps with it, including while it waits. Notes:
+  * In the manual approach, _Counit::create()_ performs the join by itself when called directly from a test method
+    something depends on, so the usual shape — compute into a by-ref variable inside the callback, return it from
+    the test method — just works. A producer can also call _Counit::createAndJoin()_ instead, which returns the
+    callback's value (and rethrows its failure) directly. No assertion credit is applied on the join path: the body
+    completes before _PHPUnit_ reads the count, so the real assertions are counted — and a producer performing none
+    stays risky, which is what makes _PHPUnit_ skip its dependents.
+  * The whole-class form (`@depends Class::class`) requires _PHPUnit_ >= 9.3; older versions (with or without
+    _counit_) warn that the target does not exist. A producer using a data provider passes _NULL_ to its
+    dependents — under plain _PHPUnit_ 8/9 too; upstream behavior, not a _counit_ limitation.
 * The timing of _tearDown()_ differs between the two approaches:
   * **The automatic approach** runs the whole test lifecycle — _setUp()_, the test method, and _tearDown()_ — inside
     one coroutine, so _tearDown()_ always observes a finished test body, exactly as under plain _PHPUnit_.
