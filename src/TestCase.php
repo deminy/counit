@@ -251,8 +251,14 @@ class TestCase extends BaseTestCase
             // returns, so without the join they would inspect the test while its body is still
             // in flight, and a throwing hook could not fail the test natively. See
             // PostConditions.
+            // A run with --disallow-test-output active joins every test too: the
+            // unexpected-output risky check reads the test's captured output right after
+            // runBare(), and only a joined body's output can be replayed into PHPUnit's buffer
+            // in time (Swoole gives each coroutine its own output-buffer stack -- see
+            // OutputCapture). The run serializes for the duration; see OutputExpectations.
             if (DependencyMap::isProducer(static::class, $this->name())
                 || TimeLimit::enforcedForRun()
+                || OutputExpectations::disallowedForRun()
                 || GlobalState::isBackedUp(static::class, $this->name())
                 || PostConditions::isCustomizedFor(static::class)) {
                 // The body will have fully run before this method returns, so PHPUnit's own

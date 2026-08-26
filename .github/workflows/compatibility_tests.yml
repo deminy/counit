@@ -301,6 +301,62 @@ jobs:
             esac
           done
 
+      - name: Test Output Expectations
+        # Swoole gives every coroutine its own output-buffer stack, so PHPUnit's buffer --
+        # opened on the runner coroutine at the top of runBare() -- never saw a byte the test
+        # body echoed from inside its coroutine: expectOutputString()/expectOutputRegex()
+        # compared against '' unconditionally (before OR after a yield), the output leaked raw
+        # to the terminal, and --disallow-test-output was a silent no-op. counit now captures
+        # each coroutine's output, joins a test with a registered expectation at its first
+        # yield, and replays the captured bytes into PHPUnit's still-open buffer, so match,
+        # mismatch and never-printed all verify natively against the real, complete output.
+        # The pollution target pins the isolation (noisy bystanders overlapping expecting
+        # tests); the risky target pins --disallow-test-output, which joins EVERY test (the
+        # run serializes, with a notice under Swoole) so the unexpected-output risky check is
+        # exact. The expected output is identical with and without Swoole.
+        run: |
+          for target in OutputExpectationTest OutputExpectationManualTest OutputMismatchTest OutputPollutionTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/output.log 2> /tmp/output.err || rc=$?
+            cat /tmp/output.log /tmp/output.err
+            # Nothing may surface as a deferred end-of-run failure.
+            ! grep -qF 'already been reported as passed' /tmp/output.err
+            case "$target" in
+              OutputExpectationTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (3 tests, 3 assertions)' /tmp/output.log ;;
+              OutputExpectationManualTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (2 tests, 2 assertions)' /tmp/output.log ;;
+              OutputMismatchTest)
+                test "$rc" -eq 1
+                grep -qF 'Tests: 2, Assertions: 2, Failures: 2.' /tmp/output.log
+                # The failures must carry the REAL actual output, not the empty string the
+                # broken capture used to compare against.
+                grep -qF "+'actual'" /tmp/output.log ;;
+              OutputPollutionTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (5 tests, 5 assertions)' /tmp/output.log ;;
+            esac
+          done
+          # Without --disallow-test-output a printing test stays green ...
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/OutputRiskyTest.php > /tmp/output.log 2>&1 || rc=$?
+          cat /tmp/output.log
+          test "$rc" -eq 0
+          grep -qF 'OK (1 test, 1 assertion)' /tmp/output.log
+          # ... and with it, the risky verdict carries the literal printed text, exactly as
+          # under blocking PHPUnit (where the option used to be a silent no-op under Swoole).
+          rc=0
+          ./counit -c phpunit.xml.dist --disallow-test-output tests/regression/OutputRiskyTest.php > /tmp/output.log 2> /tmp/output.err || rc=$?
+          cat /tmp/output.log /tmp/output.err
+          test "$rc" -eq 0
+          grep -qF 'Tests: 1, Assertions: 1, Risky: 1.' /tmp/output.log
+          grep -qF 'printed unexpected output: unexpected-output' /tmp/output.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'the run is serialized' /tmp/output.err
+          fi
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

@@ -58,6 +58,7 @@ final class CounitExtension implements Extension
         // seam -- no reflection into PHPUnit's @internal configuration Registry needed.
         TimeLimit::initialize($configuration);
         GlobalState::initialize($configuration);
+        OutputExpectations::initialize($configuration);
 
         if (Helper::isCoroutineFriendly()) {
             if (TimeLimit::enforcedForRun()) {
@@ -66,6 +67,10 @@ final class CounitExtension implements Extension
 
             if (GlobalState::configBacksUpEveryTest()) {
                 GlobalState::announceSerializedRun();
+            }
+
+            if (OutputExpectations::disallowedForRun()) {
+                OutputExpectations::announceSerializedRun();
             }
 
             // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine

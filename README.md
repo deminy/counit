@@ -332,6 +332,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `#[DataProvider]` / `#[TestWith]` | ✅ (providers themselves run serialized, at collection time) | ✅ (`@dataProvider`) |
 | `#[DoesNotPerformAssertions]`; `expectNotToPerformAssertions()` in `setUp()` or at the top of the test body | ✅ (method and class level) | ✅ (`@doesNotPerformAssertions`; method level only — _PHPUnit_ 8/9 itself ignores the class-level annotation) |
 | `expectException()` and friends (message/code/object variants included) | ✅ exact — a test with a registered expectation is joined at its first yield, so PHPUnit verifies the real Throwable natively: match, mismatch, and never-thrown all report as in blocking mode, in both approaches. The expectation must be declared before the first yield (one declared only after it is invisible at the join decision and keeps the old premature-failure behavior) | ✅ — same join fix, in both approaches (the automatic approach verified a matching post-yield throw natively even before it, since the whole `runBare()` runs inside the coroutine); PHPUnit 9's `expectWarning()` family after a yield is fixed by the join as well — the converting error handler stays registered while PHPUnit waits |
+| `expectOutputString()` / `expectOutputRegex()` | ✅ exact — Swoole gives every coroutine its own output-buffer stack (there never was a shared one: the body's output simply never reached _PHPUnit_'s buffer, which lives on the runner coroutine — so expectations compared against `''` unconditionally, before or after a yield). counit now captures the coroutine's output and replays it into _PHPUnit_'s buffer; a test with a registered expectation is joined at its first yield, so match, mismatch and never-printed all verify natively against the real, complete output, in both approaches. Such a test gets no concurrency of its own; every other test still overlaps with it. The expectation must be registered before the first yield (like an `expectException()`) | ✅ the automatic approach was always correct there, with full concurrency kept (the whole `runBare()` — buffer and verification included — runs inside the test's coroutine); the manual approach has the same missing-capture defect as 1.x had and awaits the same capture-and-replay fix |
 | Stubs (`createStub()`, `createMock()` + `willReturn()` etc., no `expects()`) | ✅ | ✅ |
 | Mock `->expects(...)` **satisfied before** the first yield | ✅ | ✅ |
 | `setUp()`, `assertPreConditions()`, `setUpBeforeClass()`, `tearDownAfterClass()` | ✅ (run outside the coroutines: serialized, no speedup) | ✅ — but `setUp()` and `assertPreConditions()` run *inside* the test's coroutine there (concurrent, with speedup); only the class-level hooks are serialized. A `setUp()` that aborts after its own yield falls into the deferred post-yield reporting |
@@ -353,10 +354,10 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | Feature | Counit 1.x | Counit 0.x (reference) |
 |---|---|---|
 | Mock `->expects(...)` verified for a call made **after** a yield | ❌ verified too early — false "called 0 times" failures. A test joined for another reason (a `#[Depends]` producer, a registered `expectException()`, a post-condition-customizing class, …) is verified after its finished body, incidentally correct | ✅ verified after the finished body |
-| `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
 | PHPUnit's error/exception-handler snapshot (the "test … did not remove its own exception handlers" risky check) | ❌ the handler stack is snapshotted and restored around `runBare()` — under counit, at the test's first yield — for **every** test: a handler registered after a yield is neither restored nor reported, and leaks into later tests. Covering it would mean joining every test | ❌ same |
+| The "test printed unexpected output" check and JUnit `system-out`, for **post-yield** output of a test that registers no output expectation | ⚠️ exact while `--disallow-test-output` is active — counit then joins every test, so _PHPUnit_ sees the complete output and reports the risky verdict natively; the run serializes for the duration (STDERR notice). Without the option, such a test's post-yield output goes to the terminal in one batch instead of into _PHPUnit_'s buffer — visible, but absent from the unexpected-output annotation and `--log-junit`'s `system-out`. A test leaving its own output buffer open is likewise only reported natively when it is joined | ⚠️ never reported; in the automatic approach the post-yield stray output is swallowed by the coroutine-local buffer rather than printed |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
 | A `tearDown()` / `#[After]` hook that throws or skips | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error; a skip signalled from such a hook — a test **failure** under blocking _PHPUnit_, never a skip — is reported the same way. Fully native semantics apply on a joined `#[Depends]` producer and on a test whose `setUp()` threw or skipped (their hooks run natively) | ⚠️ a hook throw after a yield lands in the deferred block (before one, it errors the test natively); a hook **skip** is a genuine skip on _PHPUnit_ 8/9 — upstream semantics, exit code 0 — and 0.x honors it: natively before a yield, via the benign end-of-run notice after one. Joined producers' hooks are fully native there too |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
@@ -433,6 +434,32 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * The detection reads _PHPUnit_'s internal expectation state (kept in two different shapes across PHPUnit 12.5
     and 13); should a future _PHPUnit_ release change it, _counit_ prints a notice once and degrades to the
     previous behavior — loud, never silent.
+* Methods _expectOutputString()_ and _expectOutputRegex()_ work with exact _PHPUnit_ semantics — at the price of
+  the expecting test's concurrency. The root cause here is not timing but visibility: Swoole gives every coroutine
+  its **own** output-buffer stack (a coroutine starts at `ob_get_level() === 0` no matter what its creator had
+  open), while _PHPUnit_ opens the test's output buffer on the runner coroutine at the top of _runBare()_ — so
+  nothing a test body echoed from inside its coroutine ever reached that buffer. Expectations compared against an
+  empty string unconditionally — a yield was not even needed — the output leaked raw into the progress output, and
+  the "printed unexpected output" machinery never saw a byte. A join alone cannot fix this (the joined body still
+  writes into its own coroutine's stack); _counit_ therefore **captures** each coroutine's output in a buffer of
+  its own and **replays** it on the calling coroutine, inside _PHPUnit_'s still-open buffer: immediately for a
+  body that never yielded, after the join for a test with a registered expectation (detected through the public
+  _expectsOutput()_ — no reflection involved), and, for a test joined for any *other* reason, incidentally as
+  well. The capture buffer is opened in whichever shape the running _PHPUnit_ uses for its own, so the
+  `ob_flush()` corner behaves per version exactly as in blocking mode. Notes:
+  * Only output-expecting tests that yield lose their own concurrency; every other test still overlaps with them,
+    including while they wait. Like the other join paths, no assertion credit is applied — the output verification
+    counts its own assertion natively.
+  * An expectation must be registered — or `getActualOutputForAssertion()`/`getActualOutput()` first called —
+    before the test's first yield; one only reached after it is invisible at the join decision and keeps the old
+    behavior (a retrieval after a yield returns `''`, producing a loud failure, never a silent pass). Both are
+    exact under `--disallow-test-output`, which joins every test (see the matrix row on unexpected output).
+  * A body that leaves its own `ob_start()` open (or closes a buffer that is not its own) has the level mismatch
+    reproduced on the runner coroutine, so _PHPUnit_ itself reports the native "did not close its own output
+    buffers" verdict — for joined tests; a non-joined test's mismatch is contained to its coroutine.
+  * Post-yield output of a test that is never joined cannot be replayed into the right buffer anymore (_PHPUnit_
+    already stopped it); it reaches the terminal in one contiguous batch at body end — where it already went
+    before this fix, just no longer interleaved.
 * Option `--enforce-time-limit` works with exact _PHPUnit_ semantics — at the price of the run's concurrency.
   _PHPUnit_ times a limited test by wrapping the whole _runBare()_ call in a `pcntl_alarm()`/`SIGALRM` guard
   (package _phpunit/php-invoker_) and disarms the alarm the moment _runBare()_ returns. Under _counit_ that used to
