@@ -343,7 +343,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `#[Requires*]` preconditions | ✅ | ✅ (`@requires`) |
 | `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
 | `--fail-on-risky` / `--fail-on-incomplete` / `--fail-on-skipped` | ✅ | ✅ |
-| `--enforce-time-limit` (with `--default-time-limit`, `#[Small]`/`#[Medium]`/`#[Large]`) | ✅ exact — every test is joined at its first yield while the option is active, so PHPUnit times the real `runBare()` and reports a timeout natively (risky verdict, `--fail-on-risky` honored), in both approaches. The run is serialized for the duration: with the option, counit gives PHPUnit's timings and PHPUnit's speed (a STDERR notice announces this). Needs `ext-pcntl`, as under plain _PHPUnit_; marginally more lenient at the exact boundary (see notes) | ❌ measures only up to the first yield; a limit expiring while a joined test waits can even abort an unrelated test (fix not yet ported) |
+| `--enforce-time-limit` (with `--default-time-limit`, `#[Small]`/`#[Medium]`/`#[Large]`) | ✅ exact — every test is joined at its first yield while the option is active, so PHPUnit times the real `runBare()` and reports a timeout natively (risky verdict, `--fail-on-risky` honored), in both approaches. The run is serialized for the duration: with the option, counit gives PHPUnit's timings and PHPUnit's speed (a STDERR notice announces this). Needs `ext-pcntl`, as under plain _PHPUnit_; marginally more lenient at the exact boundary (see notes) | ✅ same join fix (with `@small`/`@medium`/`@large` annotations) — PHPUnit 8/9's identical `pcntl_alarm()` guard over `runBare()` then times and reports natively; the risky verdict carries php-invoker's "Execution aborted" message, and the aborted test is flagged risky twice there (the abort plus its missing assertions) |
 | Exit code as the pass/fail signal | ✅ authoritative (failures after a yield force a non-zero exit) | ✅ |
 
 ## Incompatible features
@@ -456,9 +456,11 @@ faster, with limitations apply. Here is a list of limitations of this package:
     margin.
   * A test body that never yields was timed exactly even before this fix, and still is: the alarm dispatches on the
     running code just as under plain _PHPUnit_.
-  * On the 0.2.x line the option remains unsupported: the root cause is identical (_PHPUnit_ 8/9's
-    _TestResult::run()_ wraps _runBare()_ in the same `pcntl_alarm()` guard, and 0.2.x's _runBare()_ override
-    returns at the body's first yield), and the join-based fix has not been ported.
+  * The 0.2.x line carries the same join-based fix (the root cause is identical there: _PHPUnit_ 8/9's
+    _TestResult::run()_ wraps _runBare()_ in the same `pcntl_alarm()` guard, and 0.2.x's _runBare()_ override used
+    to return at the body's first yield), with two cosmetic differences: the risky verdict carries php-invoker's
+    "Execution aborted after N seconds" message rather than _PHPUnit_'s "This test was aborted" wording, and
+    _PHPUnit_ 8/9 count an aborted test's abort and its missing assertions as two risky entries.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being
