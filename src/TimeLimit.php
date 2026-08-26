@@ -68,30 +68,34 @@ final class TimeLimit
      */
     public static function enforcedForRun(?TestCase $test = null): bool
     {
-        if (self::$enforced === null) {
-            if (!$test instanceof TestCase) {
-                return false;
-            }
-
-            $testResult = $test->getTestResultObject();
-            if ($testResult === null) {
-                return false;
-            }
-
-            self::$enforced = $testResult->enforcesTimeLimit()
-                && extension_loaded('pcntl')
-                && function_exists('pcntl_signal')
-                && function_exists('pcntl_async_signals')
-                && function_exists('pcntl_alarm')
-                && class_exists(Invoker::class)
-                && !(extension_loaded('xdebug') && function_exists('xdebug_is_debugger_active') && xdebug_is_debugger_active());
-
-            if (self::$enforced) {
-                self::announceSerializedRun();
-            }
+        if (self::$enforced !== null) {
+            return self::$enforced;
         }
 
-        return self::$enforced;
+        if (!$test instanceof TestCase) {
+            return false;
+        }
+
+        $testResult = $test->getTestResultObject();
+        if ($testResult === null) {
+            return false;
+        }
+
+        $enforced = $testResult->enforcesTimeLimit()
+            && extension_loaded('pcntl')
+            && function_exists('pcntl_signal')
+            && function_exists('pcntl_async_signals')
+            && function_exists('pcntl_alarm')
+            && class_exists(Invoker::class)
+            && !(extension_loaded('xdebug') && function_exists('xdebug_is_debugger_active') && xdebug_is_debugger_active());
+
+        self::$enforced = $enforced;
+
+        if ($enforced) {
+            self::announceSerializedRun();
+        }
+
+        return $enforced;
     }
 
     /**

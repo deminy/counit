@@ -320,7 +320,11 @@ class Counit
             // coroutine (see OutputCapture).
             $joinForOutput = $caller instanceof TestCase
                 && !($caller instanceof \Deminy\Counit\TestCase)
-                && method_exists($caller, 'hasExpectationOnOutput')
+                // Deliberately guarded although every PHPUnit release in the supported range
+                // declares the method (which is why PHPStan proves the check redundant against
+                // the analyzed vendor): a future or unexpected shape degrades to "no join"
+                // instead of a fatal.
+                && method_exists($caller, 'hasExpectationOnOutput') // @phpstan-ignore function.alreadyNarrowedType
                 && $caller->hasExpectationOnOutput();
 
             // A manual-approach test that has registered a mock carrying a matcher
@@ -352,7 +356,10 @@ class Counit
             // it as before (the joined body's real assertions are counted natively); the joins
             // decided below (exception/output expectations) keep the credit, exactly as they
             // always did -- the run total stays exact either way through the credits correction.
-            if ($count > 0 && $caller instanceof TestCase && !$finished
+            // The instanceof is provably redundant to PHPStan (a positive $count already threw
+            // for a non-TestCase caller before the spawn) but kept for the narrowing and as
+            // documentation of the invariant.
+            if ($count > 0 && $caller instanceof TestCase && !$finished // @phpstan-ignore instanceof.alwaysTrue
                 && !$joinForTimeLimit && !$joinForGlobalState && !$joinForPostConditions) {
                 self::creditAssertionCount($caller, $count);
             }

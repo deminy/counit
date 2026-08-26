@@ -23,7 +23,7 @@ class CurlTest extends TestCase
         if ($ch === false) {
             self::fail('The curl resource is invalid.');
         }
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
         $startTime = time();
         $body      = curl_exec($ch);
