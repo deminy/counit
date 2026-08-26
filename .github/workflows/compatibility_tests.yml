@@ -91,6 +91,17 @@ jobs:
           grep -qF 'Tests: 6, Assertions: 5, Errors: 1, Skipped: 1.' /tmp/depends-td.log
           ! grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log
           ! grep -qF 'already been reported as passed' /tmp/depends-td.err
+          # A joined producer that performs no assertions must stay RISKY under Swoole -- the
+          # join path applies no up-front assertion credit (a credited producer would count one
+          # assertion and lose the verdict). PHPUnit 12/13 records the producer's pass and
+          # return value regardless of the risky verdict, so the dependent still runs with the
+          # real value; the expected output is the exact blocking shape, in both modes.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsRiskyProducerTest.php > /tmp/depends-risky.log 2> /tmp/depends-risky.err || rc=$?
+          cat /tmp/depends-risky.log /tmp/depends-risky.err
+          test "$rc" -eq 0
+          grep -qF 'Tests: 2, Assertions: 1, Risky: 1.' /tmp/depends-risky.log
+          grep -qF 'This test did not perform any assertions' /tmp/depends-risky.log
 
       - name: Test After-Test Hook Edge Semantics
         # Two edges around the relocated tearDown()/#[After] hooks. (1) A test whose setUp()
