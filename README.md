@@ -423,6 +423,30 @@ faster, with limitations apply. Here is a list of limitations of this package:
     margin.
   * A test body that never yields was timed exactly even before this fix, and still is: the alarm dispatches on the
     running code just as under plain _PHPUnit_.
+* Annotations `@backupGlobals` and `@backupStaticAttributes` (and the matching
+  `backupGlobals`/`backupStaticAttributes` configuration, the exclude lists, and `--strict-global-state`) work with
+  exact _PHPUnit_ semantics — at the price of the backed-up test's concurrency. _PHPUnit_ 8/9 snapshot global state
+  as (nearly) the first statement of _runBare()_ and restore as (nearly) the last. In the automatic approach the
+  whole _runBare()_ runs inside the test's coroutine, so the backed-up test's own isolation was already correct —
+  but the snapshot window spanned the test's entire concurrent lifetime, and the restore silently reverted every
+  overlapping test's global writes (the restorer unsets every key absent from the snapshot). In the manual approach
+  — whose _runBare()_ is _PHPUnit_'s own, running on the main coroutine — the restore additionally fired at the
+  body's first yield: the body's own pre-yield writes were reverted mid-test and its post-yield writes leaked. An
+  `@backupStaticAttributes` snapshot also captured _counit_'s **own** static bookkeeping (counit's classes are
+  user-defined, so not on _PHPUnit_'s exclude list), skewing the run's reported assertion total. The fix has two
+  halves, because global state — unlike a return value, an exception or an alarm — is process-wide: the backed-up
+  test is *joined* (the `@depends`-producer mechanism, with no up-front assertion credit), and before its snapshot
+  is taken every in-flight test coroutine is *drained* — giving the snapshot/restore pair the exclusive window
+  blocking _PHPUnit_ gets for free. With that exclusive window the statics rewind becomes self-healing: everything
+  _counit_ mutates inside the window belongs to the joined test itself. Notes:
+  * A backed-up test first waits for everything already in flight, then runs serialized; every other test still
+    overlaps normally, and a suite with no backup requests is completely unaffected. A run-wide
+    `backupGlobals="true"` / `--globals-backup` (or the static-attributes equivalent) serializes the whole run.
+  * `--strict-global-state` becomes correct as a side effect: both of its comparison snapshots bracket the same
+    exclusive window, so its diff shows the test's real mutations — post-yield writes included — and nothing from
+    bystanders.
+  * A process-isolated test needs none of this and never did: isolation skips the snapshot machinery entirely (the
+    child process's mutations die with it).
 * Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
   with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
 

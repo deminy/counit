@@ -143,16 +143,18 @@ class Counit
                 }
             }
 
-            // Resolved before the credit is applied: while --enforce-time-limit is active the
-            // coroutine is joined below, so the body completes -- real assertions counted --
-            // before PHPUnit reads the count. A credit would inflate that count and mask the
-            // risky "did not perform any assertions" verdict blocking PHPUnit gives with the
-            // option. See TimeLimit for the whole story.
-            $joinForTimeLimit = TimeLimit::enforcedForRun($caller instanceof TestCase ? $caller : null);
+            // Resolved before the credit is applied: while --enforce-time-limit is active, or
+            // when the calling test is bracketed by a global-state snapshot (@backupGlobals /
+            // @backupStaticAttributes; see GlobalState), the coroutine is joined below, so the
+            // body completes -- real assertions counted -- before PHPUnit reads the count. A
+            // credit would inflate that count and mask the risky "did not perform any
+            // assertions" verdict blocking PHPUnit gives in those runs.
+            $joinForTimeLimit    = TimeLimit::enforcedForRun($caller instanceof TestCase ? $caller : null);
+            $joinForGlobalState  = $caller instanceof TestCase && GlobalState::isBackedUp($caller);
 
             if ($count > 0) {
                 if ($caller instanceof TestCase) {
-                    if (!$joinForTimeLimit) {
+                    if (!$joinForTimeLimit && !$joinForGlobalState) {
                         self::creditAssertionCount($caller, $count);
                     }
                 } else {
@@ -238,7 +240,12 @@ class Counit
             // and no other coroutine may be in flight while a test's alarm is armed (the SIGALRM
             // is delivered to whichever coroutine resumes first). The run is serialized for the
             // duration; see TimeLimit.
-            if ($joinForTimeLimit || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            // A manual-approach test bracketed by a global-state snapshot is joined for the same
+            // body-must-truly-finish reason: its runBare() is PHPUnit's own, running on the main
+            // coroutine, so the restore fires when the test method returns -- which must be
+            // after the real body, not at its first yield. The matching pre-snapshot drain lives
+            // in AssertionCountListener::startTest(); see GlobalState.
+            if ($joinForTimeLimit || $joinForGlobalState || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();

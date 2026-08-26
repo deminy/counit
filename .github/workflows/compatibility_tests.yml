@@ -234,6 +234,56 @@ jobs:
           cat /tmp/time-limit-risky.log
           test "$rc" -eq 1
 
+      - name: Test Global-State Backup Semantics
+        # @backupGlobals / @backupStaticAttributes (and the matching configuration): PHPUnit
+        # snapshots global state as nearly the first statement of runBare() and restores as
+        # nearly the last. On this branch the automatic approach runs the whole runBare() inside
+        # the test's coroutine, so the backed-up test's own isolation was already correct -- but
+        # the snapshot window spanned the test's entire concurrent lifetime, and the restore
+        # reverted every overlapping test's global writes; the manual approach (whose runBare()
+        # is PHPUnit's own, on the main coroutine) additionally had the restore fire at the
+        # body's first yield, reverting its own pre-yield writes mid-test and leaking post-yield
+        # ones. A static-attributes snapshot also rewound counit's own bookkeeping, skewing the
+        # run's assertion total. counit now drains all in-flight coroutines before the snapshot
+        # (in AssertionCountListener::startTest(), the seam just ahead of runBare()) and joins
+        # the backed-up test, giving the snapshot/restore pair an exclusive window; with it, the
+        # statics rewind is self-healing. The expected output is identical with and without
+        # Swoole, including under a run-wide --globals-backup (which serializes the run) and
+        # under --strict-global-state (whose before/after comparison now brackets the same
+        # exclusive window as in blocking mode).
+        run: |
+          for target in BackupGlobalsTest BackupGlobalsManualTest BackupCollateralTest BackupStaticsTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/backup.log 2> /tmp/backup.err || rc=$?
+            cat /tmp/backup.log /tmp/backup.err
+            test "$rc" -eq 0
+            # Nothing may surface in a deferred end-of-run block.
+            ! grep -qF 'already been reported as passed' /tmp/backup.err
+            case "$target" in
+              BackupGlobalsTest)       grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup.log ;;
+              BackupGlobalsManualTest) grep -qF 'OK (2 tests, 3 assertions)' /tmp/backup.log ;;
+              BackupCollateralTest)    grep -qF 'OK (3 tests, 3 assertions)' /tmp/backup.log ;;
+              BackupStaticsTest)       grep -qF 'OK (4 tests, 4 assertions)' /tmp/backup.log ;;
+            esac
+          done
+          # Run-wide backup configuration: same exact output, serialized under Swoole.
+          rc=0
+          ./counit -c phpunit.xml.dist --globals-backup tests/regression/BackupGlobalsTest.php > /tmp/backup-cfg.log 2> /tmp/backup-cfg.err || rc=$?
+          cat /tmp/backup-cfg.log /tmp/backup-cfg.err
+          test "$rc" -eq 0
+          grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup-cfg.log
+          # --strict-global-state: the mutating backed-up test is flagged risky, natively, in
+          # both modes -- its comparison snapshots now bracket the same exclusive window.
+          rc=0
+          ./counit -c phpunit.xml.dist --strict-global-state tests/regression/BackupGlobalsTest.php > /tmp/backup-strict.log 2>&1 || rc=$?
+          cat /tmp/backup-strict.log
+          test "$rc" -eq 0
+          grep -qF 'Tests: 2, Assertions: 4, Risky: 1.' /tmp/backup-strict.log
+          grep -qF 'Global variables before the test' /tmp/backup-strict.log
+          # The POST-yield write must appear in the comparison diff -- proof the second
+          # snapshot was taken after the real body, not at the first yield.
+          grep -qF "'counit_bg_post' => 'post-yield'" /tmp/backup-strict.log
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are read from each test object as
         # PHPUnit reports it, so under Swoole they used to carry the up-front assertion credit (one

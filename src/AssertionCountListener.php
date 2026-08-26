@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase as BaseTestCase;
 use PHPUnit\Framework\TestListener;
 use PHPUnit\Framework\TestListenerDefaultImplementation;
 use PHPUnit\Framework\TestResult;
+use Swoole\Coroutine;
 
 /**
  * Recovers the assertions PHPUnit counts *on the test object* rather than through its static
@@ -156,11 +157,32 @@ class AssertionCountListener implements TestListener
      * {@inheritDoc}
      *
      * Fires right after PHPUnit reset its static assertion counter for $test and before the
-     * test's setUp() runs, which is exactly the segment boundary Attribution needs.
+     * test's setUp() runs, which is exactly the segment boundary Attribution needs -- and, for a
+     * test PHPUnit brackets with a global-state snapshot, the one seam early enough for the
+     * pre-snapshot drain barrier (TestResult::run() calls this before runBare(), which takes the
+     * snapshot as nearly its first statement). See GlobalState for the whole design.
      */
     public function startTest(Test $test): void
     {
         if ($test instanceof BaseTestCase) {
+            // The barrier half of the @backupGlobals/@backupStaticAttributes support: drain
+            // every in-flight test coroutine before this test's snapshot can be taken, so the
+            // restore -- which reverts to that snapshot -- can never wipe a concurrent test's
+            // global writes. Runs before Attribution::testStarting() below, so the draining
+            // coroutines' assertion segments stay attributed to their own tests; the increments
+            // themselves land in this test's already-open counter window (the reset is behind
+            // us): mis-attributed but never wiped, the bucket the end-of-run total correction
+            // already handles. A test that needs the barrier but ran before this listener was
+            // attached cannot exist: pending coroutines imply an earlier Counit::create()/
+            // createAndJoin() call, which is what attaches the listener.
+            if (Helper::isCoroutineFriendly() && GlobalState::isBackedUp($test)) {
+                Attribution::suspended();
+                while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
+                    Coroutine::sleep(0.01);
+                }
+                Attribution::resumed();
+            }
+
             Attribution::testStarting(spl_object_id($test));
         }
     }

@@ -71,7 +71,16 @@ class TestCase extends BaseTestCase
             // correct. The run is serialized for the duration; see TimeLimit. No assertion
             // credit applies on the joined path, so an aborted test that reached no assertion is
             // flagged "did not perform any assertions" exactly as in blocking mode.
-            if (DependencyMap::isProducer(static::class, $this->getName(false)) || TimeLimit::enforcedForRun($this)) {
+            // A test PHPUnit brackets with a global-state snapshot (@backupGlobals /
+            // @backupStaticAttributes, or the matching configuration) is joined too: the
+            // snapshot and restore run inside parent::runBare() -- inside the coroutine -- so
+            // the test's own isolation was already correct, but the window used to span its
+            // whole concurrent lifetime, and the restore reverted every overlapping test's
+            // global writes. The join (together with the pre-snapshot drain barrier in
+            // AssertionCountListener::startTest()) makes the window exclusive; see GlobalState.
+            if (DependencyMap::isProducer(static::class, $this->getName(false))
+                || TimeLimit::enforcedForRun($this)
+                || GlobalState::isBackedUp($this)) {
                 Counit::createAndJoin(function (): void {
                     parent::runBare();
                 });
