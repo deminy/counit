@@ -63,7 +63,15 @@ class TestCase extends BaseTestCase
             // which is what makes PHPUnit skip its dependents in blocking mode. It costs that
             // one test its own concurrency; every other test still overlaps with it, including
             // while it waits.
-            if (DependencyMap::isProducer(static::class, $this->getName(false))) {
+            // A run with --enforce-time-limit active takes the same join, for EVERY test: PHPUnit
+            // times a limited test by wrapping this very runBare() in a pcntl_alarm() guard
+            // (TestResult::run() via the php-invoker package), so parent::runBare() must have
+            // truly finished before this method returns for the measured window -- and the
+            // alarm's SIGALRM, which is delivered to whichever coroutine resumes first -- to be
+            // correct. The run is serialized for the duration; see TimeLimit. No assertion
+            // credit applies on the joined path, so an aborted test that reached no assertion is
+            // flagged "did not perform any assertions" exactly as in blocking mode.
+            if (DependencyMap::isProducer(static::class, $this->getName(false)) || TimeLimit::enforcedForRun($this)) {
                 Counit::createAndJoin(function (): void {
                     parent::runBare();
                 });

@@ -143,9 +143,18 @@ class Counit
                 }
             }
 
+            // Resolved before the credit is applied: while --enforce-time-limit is active the
+            // coroutine is joined below, so the body completes -- real assertions counted --
+            // before PHPUnit reads the count. A credit would inflate that count and mask the
+            // risky "did not perform any assertions" verdict blocking PHPUnit gives with the
+            // option. See TimeLimit for the whole story.
+            $joinForTimeLimit = TimeLimit::enforcedForRun($caller instanceof TestCase ? $caller : null);
+
             if ($count > 0) {
                 if ($caller instanceof TestCase) {
-                    self::creditAssertionCount($caller, $count);
+                    if (!$joinForTimeLimit) {
+                        self::creditAssertionCount($caller, $count);
+                    }
                 } else {
                     throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
                 }
@@ -223,7 +232,13 @@ class Counit
             // back where its native verification expects it. The check happens here rather than
             // before the spawn on purpose: expectException() is called inside the body, so the
             // expectation only exists once the body has run to its first yield.
-            if ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller)) {
+            // A run with --enforce-time-limit active joins EVERY create() call -- test bodies and
+            // nested calls alike: PHPUnit times a limited test by wrapping runBare() in a
+            // pcntl_alarm() guard, so the body must have truly finished before runBare() returns,
+            // and no other coroutine may be in flight while a test's alarm is armed (the SIGALRM
+            // is delivered to whichever coroutine resumes first). The run is serialized for the
+            // duration; see TimeLimit.
+            if ($joinForTimeLimit || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();
