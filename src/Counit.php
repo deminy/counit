@@ -155,6 +155,7 @@ class Counit
 
             $id = Coroutine::create(function () use ($callable, $caller, $testId, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($testId);
+                HandlerIsolation::sliceStarted();
                 $obHandle = OutputCapture::start();
 
                 try {
@@ -219,6 +220,10 @@ class Counit
 
                     $finished = true;
 
+                    // Whatever this coroutine still holds on the handler stacks is its leak;
+                    // recorded here -- while the ownership state is still intact -- for the
+                    // end-of-run verdict emit. See HandlerIsolation.
+                    HandlerIsolation::coroutineFinished($testId);
                     Attribution::coroutineFinished();
                     $done->push(true);
                 }
@@ -519,6 +524,7 @@ class Counit
 
         Coroutine::create(function () use ($callable, $caller, $testId, $done, &$result, &$thrown, &$capturedOutput, &$outputLevelDelta): void {
             Attribution::coroutineStarted($testId);
+            HandlerIsolation::sliceStarted();
             $obHandle = OutputCapture::start();
 
             try {
@@ -541,6 +547,8 @@ class Counit
 
                 [$capturedOutput, $outputLevelDelta] = OutputCapture::stop($obHandle);
 
+                // See create() -- same leak recording for the joined path.
+                HandlerIsolation::coroutineFinished($testId);
                 Attribution::coroutineFinished();
                 $done->push(true);
             }

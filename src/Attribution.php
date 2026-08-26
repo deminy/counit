@@ -128,6 +128,11 @@ final class Attribution
     /** The current coroutine is about to yield: claim its segment and release the counter. */
     public static function suspended(): void
     {
+        // Before the counter switch below clears the ownership state sliceIsTrustworthy() reads:
+        // lift the suspending coroutine's own handlers off the shared stacks. See
+        // HandlerIsolation.
+        HandlerIsolation::sliceEnded();
+
         if (!self::$enabled) {
             return;
         }
@@ -153,6 +158,28 @@ final class Attribution
         }
 
         self::switchTo(self::$cidOwner[self::currentCoroutineId()] ?? self::$mainOwner);
+        // After the counter switch re-established the ownership state sliceIsTrustworthy()
+        // reads: put the resuming coroutine's own handlers back on the shared stacks. See
+        // HandlerIsolation.
+        HandlerIsolation::sliceStarted();
+    }
+
+    /**
+     * Whether the current coroutine is the counter's declared owner -- i.e. its current slice
+     * began at an observation point counit controls, so everything that happened during the
+     * slice provably belongs to it. False after a resume counit could not observe (hooked
+     * network/DB IO, a fully-qualified \sleep(), a test class in the global namespace); see
+     * HandlerIsolation, which uses this to decide whether a handler-stack delta may be claimed.
+     */
+    public static function sliceIsTrustworthy(): bool
+    {
+        if (!self::$enabled) {
+            return false;
+        }
+
+        $owner = self::$cidOwner[self::currentCoroutineId()] ?? null;
+
+        return ($owner !== null) && (self::$current === $owner);
     }
 
     /**

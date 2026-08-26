@@ -81,6 +81,9 @@ final class CounitExtension implements Extension
             // so attribution stays off under it and the JUnit per-testcase correction falls back
             // to the credit/late arithmetic in Counit::correctedAssertionCountFor().
             Attribution::$enabled = !filter_var((string) ini_get('swoole.enable_preemptive_scheduler'), FILTER_VALIDATE_BOOL);
+            // The handler isolation piggybacks on Attribution's observation points and trusts
+            // only slices Attribution can vouch for, so it degrades to a no-op alongside it.
+            HandlerIsolation::$enabled = true;
 
             // The reverse #[Depends] graph has to be known before the first producer runs, and
             // this event carries the whole (already flattened) suite. See DependencyMap.
@@ -148,6 +151,7 @@ final class CounitExtension implements Extension
                 public function notify(TestConsideredRisky $event): void
                 {
                     UselessTests::markFlagged($event->test()->id(), $event->message());
+                    HandlerIsolation::markFlagged($event->test()->id(), $event->message());
                 }
             });
             $facade->registerSubscriber(new class implements TestErroredSubscriber {
@@ -197,6 +201,7 @@ final class CounitExtension implements Extension
                     Counit::recordEmittedAssertionCount($test->id(), $event->numberOfAssertionsPerformed());
                     Attribution::testFinished($test->id());
                     UselessTests::record($test);
+                    HandlerIsolation::record($test);
 
                     if ($test->isTestMethod()) {
                         JunitXmlCorrector::recordTest($test->className(), $test->name(), $test->id());
@@ -267,6 +272,7 @@ final class CounitExtension implements Extension
                     // collector is only read after this subscriber returns. Must run before the
                     // correction below, which consumes the counter residue.
                     UselessTests::emitDeferred();
+                    HandlerIsolation::emitDeferred();
 
                     JunitXmlCorrector::correct();
 

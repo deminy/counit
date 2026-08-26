@@ -408,6 +408,56 @@ jobs:
             grep -qF 'This test did not perform any assertions' /tmp/useless.log
           fi
 
+      - name: Test Error/Exception Handler Isolation
+        # PHPUnit snapshots the error/exception handler stacks at the top of runBare() and
+        # compares/restores them at its bottom -- under counit, the body's first yield --
+        # unconditionally, for every test. The stacks are process-global under Swoole (unlike
+        # the output-buffer stack), so this used to break four ways: a legal handler spanning a
+        # yield was stripped mid-body and falsely flagged, a post-yield registration leaked
+        # unreported (and could swallow other tests' diagnostics), and a bystander whose window
+        # covered someone else's leak was blamed for it. counit now lifts each coroutine's own
+        # handlers off the shared stack while it is suspended and puts them back on resume (see
+        # HandlerIsolation); leaks are reported with PHPUnit's exact wording against the test
+        # that actually holds them -- natively for never-yielding tests, via the end-of-run
+        # emit otherwise. The attribution target must grep the risky TEST NAME, not the count:
+        # the broken behavior has the same count with the wrong name. The expected output is
+        # identical with and without Swoole.
+        run: |
+          # A test's own handler must survive its yield: clean, nothing risky, nothing deferred.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/HandlerSpanTest.php > /tmp/handler.log 2> /tmp/handler.err || rc=$?
+          cat /tmp/handler.log /tmp/handler.err
+          test "$rc" -eq 0
+          grep -qF 'OK (1 test, 1 assertion)' /tmp/handler.log
+          ! grep -qF 'did not remove its own error handlers' /tmp/handler.log
+          ! grep -qF 'already been reported as passed' /tmp/handler.err
+          # All four verdict kinds, before and after the first yield; --fail-on-risky exits 1.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/HandlerLeakTest.php > /tmp/handler.log 2>&1 || rc=$?
+          cat /tmp/handler.log
+          test "$rc" -eq 0
+          grep -qF 'Tests: 4, Assertions: 4, Risky: 4.' /tmp/handler.log
+          test "$(grep -cF 'did not remove its own error handlers' /tmp/handler.log)" -eq 2
+          grep -qF 'did not remove its own exception handlers' /tmp/handler.log
+          grep -qF 'removed error handlers other than its own' /tmp/handler.log
+          rc=0
+          ./counit -c phpunit.xml.dist --fail-on-risky tests/regression/HandlerLeakTest.php > /dev/null 2>&1 || rc=$?
+          test "$rc" -eq 1
+          # The verdict must name the leaker, never an innocent bystander.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/HandlerAttributionTest.php > /tmp/handler.log 2>&1 || rc=$?
+          cat /tmp/handler.log
+          test "$rc" -eq 0
+          grep -qF 'Tests: 4, Assertions: 4, Risky: 1.' /tmp/handler.log
+          grep -qF 'HandlerAttributionTest::testALeaksAfterAShortYield' /tmp/handler.log
+          ! grep -qF 'testInnocentBystander' /tmp/handler.log
+          # A leaked handler must not swallow a later test's deprecation.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/HandlerCanaryTest.php > /tmp/handler.log 2>&1 || rc=$?
+          cat /tmp/handler.log
+          test "$rc" -eq 0
+          grep -qF 'Tests: 2, Assertions: 2, Deprecations: 1, Risky: 1.' /tmp/handler.log
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit
