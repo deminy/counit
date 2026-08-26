@@ -179,6 +179,17 @@ class Counit
             $done            = new Coroutine\Channel(1);
             $key             = ($caller instanceof TestCase) ? spl_object_id($caller) : null;
 
+            // Swoole gives every coroutine its own output-buffer stack, so a manual-approach
+            // body's echo -- running inside the coroutine spawned below -- would never reach
+            // PHPUnit's output buffer, which lives on the main coroutine (see OutputCapture).
+            // The output is captured inside the coroutine and replayed on this, the calling,
+            // coroutine. Scoped to the manual approach on purpose: the automatic approach's own
+            // create(parent::runBare()) call runs PHPUnit's whole buffering INSIDE the coroutine
+            // already -- correct capture, full concurrency -- and must not be double-wrapped.
+            $captureOutput    = $caller instanceof TestCase && !($caller instanceof \Deminy\Counit\TestCase);
+            $capturedOutput   = '';
+            $outputLevelDelta = 0;
+
             if ($key !== null) {
                 // Normally a no-op: the run's TestListener already claimed the counter for this
                 // test at startTest(). It matters for the one test whose startTest() fired before
@@ -188,8 +199,9 @@ class Counit
                 Attribution::claimMain($key);
             }
 
-            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, $description): void {
+            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($key);
+                $obHandle = $captureOutput ? OutputCapture::start() : null;
 
                 try {
                     $callable();
@@ -212,6 +224,21 @@ class Counit
                         $caught = $e;
                     }
                 } finally {
+                    if ($obHandle !== null) {
+                        [$capturedOutput, $outputLevelDelta] = OutputCapture::stop($obHandle);
+
+                        // The captured output is replayed inside PHPUnit's buffer by the calling
+                        // coroutine -- which only works while the caller is still there: either
+                        // it has not returned from create() yet, or it is waiting on the join.
+                        // Otherwise PHPUnit already stopped the buffer and the output can only go
+                        // where it went before this fix -- straight to the terminal, just in one
+                        // batch instead of interleaved.
+                        if ($alreadyReturned && !$joining) { // @phpstan-ignore booleanAnd.leftAlwaysFalse, booleanNot.alwaysTrue
+                            echo $capturedOutput;
+                            $capturedOutput = '';
+                        }
+                    }
+
                     Attribution::coroutineFinished();
                     // Unconditional, so a join decided only after this coroutine already finished
                     // (its whole body ran without yielding) still pops instantly instead of
@@ -226,6 +253,12 @@ class Counit
             Attribution::resumed();
 
             if ($caught !== null) {
+                // The body threw before ever yielding; whatever it echoed first is already
+                // captured and belongs inside PHPUnit's buffer, exactly as in blocking mode,
+                // before the Throwable reaches PHPUnit's handling.
+                echo $capturedOutput;
+                $capturedOutput = '';
+
                 throw $caught;
             }
 
@@ -257,12 +290,34 @@ class Counit
             // returns, and a throwing hook must fail/error the test natively -- which it only
             // can when the body has truly finished. Again no credit is applied. See
             // PostConditions.
-            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            // A manual-approach test with a registered output expectation
+            // (expectOutputString()/expectOutputRegex(), or output already retrieved for an
+            // assertion -- the public hasExpectationOnOutput() covers both, no reflection
+            // needed) joins so its captured output can be replayed into PHPUnit's still-open
+            // buffer below, where runBare() verifies it natively right after the test method
+            // returns: match, mismatch and never-printed all report as in blocking mode.
+            // Declared inside the body like an exception expectation, so it too is only
+            // checkable here, after the body ran to its first yield. The automatic approach
+            // needs no join for this: PHPUnit's whole buffering and verification run inside its
+            // coroutine (see OutputCapture).
+            $joinForOutput = $caller instanceof TestCase
+                && !($caller instanceof \Deminy\Counit\TestCase)
+                && method_exists($caller, 'hasExpectationOnOutput')
+                && $caller->hasExpectationOnOutput();
+
+            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || $joinForOutput || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();
                 $done->pop();
                 Attribution::resumed();
+
+                // The joined body has fully run: replay its captured output into PHPUnit's
+                // still-open buffer, and reproduce any buffer-level mismatch the body caused, so
+                // PHPUnit's own stopOutputBuffering() detects and reports it natively.
+                echo $capturedOutput;
+                $capturedOutput = '';
+                OutputCapture::replayLevelMismatch($outputLevelDelta);
 
                 // Set by reference from inside the coroutine, which PHPStan cannot see.
                 if ($thrown !== null) { // @phpstan-ignore notIdentical.alwaysFalse
@@ -270,6 +325,14 @@ class Counit
                 }
 
                 return 0;
+            }
+
+            // The body ran to completion without ever yielding: its output was captured but not
+            // yet emitted, and the caller is still inside PHPUnit's output buffer -- exactly
+            // where blocking PHPUnit puts it.
+            if ($capturedOutput !== '') {
+                echo $capturedOutput;
+                $capturedOutput = '';
             }
 
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
@@ -329,14 +392,26 @@ class Counit
         $result = null;
         $thrown = null;
 
-        Coroutine::create(function () use ($callable, $key, $done, &$result, &$thrown): void {
+        // Same manual-approach output capture as in create(): the automatic approach's joined
+        // runBare() wrapper runs PHPUnit's whole buffering inside the coroutine already and must
+        // not be double-wrapped.
+        $captureOutput    = $caller instanceof TestCase && !($caller instanceof \Deminy\Counit\TestCase);
+        $capturedOutput   = '';
+        $outputLevelDelta = 0;
+
+        Coroutine::create(function () use ($callable, $key, $done, &$result, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta): void {
             Attribution::coroutineStarted($key);
+            $obHandle = $captureOutput ? OutputCapture::start() : null;
 
             try {
                 $result = $callable();
             } catch (\Throwable $e) {
                 $thrown = $e;
             } finally {
+                if ($obHandle !== null) {
+                    [$capturedOutput, $outputLevelDelta] = OutputCapture::stop($obHandle);
+                }
+
                 Attribution::coroutineFinished();
                 $done->push(true);
             }
@@ -350,6 +425,11 @@ class Counit
         Attribution::suspended();
         $done->pop();
         Attribution::resumed();
+
+        // Replay the body's output inside PHPUnit's still-open output buffer, and reproduce any
+        // buffer-level mismatch the body caused; see create() for the whole story.
+        echo $capturedOutput;
+        OutputCapture::replayLevelMismatch($outputLevelDelta);
 
         if ($thrown !== null) {
             throw $thrown;

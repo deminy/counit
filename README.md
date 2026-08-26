@@ -468,6 +468,32 @@ faster, with limitations apply. Here is a list of limitations of this package:
     right before the test method, inside the same coroutine (automatic) or before the body's first yield (manual).
   * The detection is caller-based like the _expectException()_ one: a _Counit::create()_ call made from a helper
     object rather than the test method itself is not joined.
+* Methods _expectOutputString()_ and _expectOutputRegex()_ work with exact _PHPUnit_ semantics. The root cause here
+  is visibility, not timing: Swoole gives every coroutine its **own** output-buffer stack (a coroutine starts at
+  `ob_get_level() === 0` no matter what its creator had open). In the automatic approach that is exactly why
+  everything already worked: the whole _runBare()_ — _PHPUnit_'s own `ob_start()` and output verification
+  included — runs inside the test's coroutine, whose private buffer survives its yields, so expectations verify
+  against the real, complete output with **full concurrency kept**. In the manual approach — whose _runBare()_ is
+  _PHPUnit_'s own, running on the main coroutine — the callable's echo, running inside the spawned coroutine,
+  never reached _PHPUnit_'s buffer at all: expectations compared against an empty string unconditionally (a yield
+  was not even needed) and the output leaked raw into the progress output. _Counit::create()_ therefore
+  **captures** the coroutine's output in a buffer of its own, **joins** a test with a registered expectation at
+  its first yield (detected through the public _hasExpectationOnOutput()_ — no reflection involved; like an
+  exception expectation, it is declared inside the body), and **replays** the captured bytes on the calling
+  coroutine, inside _PHPUnit_'s still-open buffer: match, mismatch and never-printed all report natively, with
+  the real actual output in the diff. Notes:
+  * Only manual-approach output-expecting tests that yield lose their own concurrency; every other test still
+    overlaps with them. Automatic-approach tests are never joined for this — they need no fix.
+  * An expectation must be registered before the callable's first yield; one only reached after it is invisible
+    at the join decision and keeps the old behavior.
+  * A body that leaves its own `ob_start()` open has the level mismatch reproduced on the main coroutine, so
+    _PHPUnit_ itself reports the native "did not (only) close its own output buffers" risky verdict — for joined
+    tests.
+  * Post-yield output of a manual-approach test that is never joined reaches the terminal in one contiguous
+    batch at body end — where it already went before this fix, just no longer interleaved. The "test printed
+    unexpected output" check (`--disallow-test-output`) remains unsupported on this branch for post-yield output
+    in both approaches (in the automatic approach such stray output is swallowed by the coroutine-local buffer);
+    the check itself runs outside _runBare()_, too early under _counit_.
 * Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
   with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
 
