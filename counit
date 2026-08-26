@@ -170,10 +170,18 @@ if (extension_loaded('swoole') && !$repeatRequested) {
     // non-coroutine PHP, against the TestResult of the run. When no test ever created a
     // coroutine, the TestResult was not captured and neither correction applies.
     $testResult = Deminy\Counit\Counit::$testResult;
-    if ($code === 1 && $testResult !== null && $testResult->wasSuccessfulIgnoringWarnings()) {
-        // A warnings-only run: successful on PHPUnit's native exit path (the --fail-on-warning
-        // re-check below restores the opt-in failure).
-        $code = 0;
+    if ($code === 1 && $testResult !== null) {
+        // PHPUnit 8.0 predates TestResult::wasSuccessfulIgnoringWarnings(); derive the same
+        // answer from its components there. (Calling the missing method would fatal at shutdown,
+        // turning every failing run's exit code 1 into 255.)
+        $successfulIgnoringWarnings = method_exists($testResult, 'wasSuccessfulIgnoringWarnings')
+            ? $testResult->wasSuccessfulIgnoringWarnings()
+            : ($testResult->errorCount() === 0 && $testResult->failureCount() === 0);
+        if ($successfulIgnoringWarnings) {
+            // A warnings-only run: successful on PHPUnit's native exit path (the --fail-on-warning
+            // re-check below restores the opt-in failure).
+            $code = 0;
+        }
     }
     if ($code === 0 && $testResult !== null) {
         $argv       = $_SERVER['argv'];
