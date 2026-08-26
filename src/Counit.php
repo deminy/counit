@@ -323,6 +323,27 @@ class Counit
                 && method_exists($caller, 'hasExpectationOnOutput')
                 && $caller->hasExpectationOnOutput();
 
+            // A manual-approach test that has registered a mock carrying a matcher
+            // (->expects(...)) joins for the same body-must-truly-finish reason: its runBare()
+            // is PHPUnit's own, running on the main coroutine, so verifyMockObjects() fires when
+            // the test method returns -- the callable's first yield -- and that verification is
+            // not read-only: a mock already satisfied at that instant passed and was then
+            // STRIPPED (its invocation mocker unset), so a post-yield never()/exceeded-count
+            // violation was silently allowed, while a not-yet-satisfied expectation failed
+            // prematurely. Joining lets PHPUnit verify the truly finished body and classify
+            // natively in both directions; a violation mid-body throws at call time into the
+            // joined body, exactly as in blocking mode. Any registered double counts, matchers
+            // or not: PHPUnit 8/9 verify-and-reset EVERY registered mock (the matcher gate there
+            // only controls the assertion count), so even a matcher-less createMock() used as a
+            // plain stub had its willReturn() configuration stripped at the first yield -- the
+            // join fixes that corruption too. Scoped to the manual approach on purpose: the
+            // automatic approach's own create(parent::runBare()) call runs the whole
+            // verification inside the coroutine already -- correct verdicts, full concurrency --
+            // and must not be joined for this. See MockExpectations.
+            $joinForMocks = $caller instanceof TestCase
+                && !($caller instanceof \Deminy\Counit\TestCase)
+                && MockExpectations::isVerifiableFor($caller);
+
             // The requested credit is applied only now, after the spawn: a body that ran to
             // completion without ever yielding needs no credit -- PHPUnit is about to read the
             // test's real, final count, exactly as in blocking mode -- so a test that genuinely
@@ -336,7 +357,7 @@ class Counit
                 self::creditAssertionCount($caller, $count);
             }
 
-            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || $joinForOutput || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || $joinForOutput || $joinForMocks || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();

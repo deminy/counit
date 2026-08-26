@@ -514,6 +514,28 @@ faster, with limitations apply. Here is a list of limitations of this package:
     unexpected output" check (`--disallow-test-output`) remains unsupported on this branch for post-yield output
     in both approaches (in the automatic approach such stray output is swallowed by the coroutine-local buffer);
     the check itself runs outside _runBare()_, too early under _counit_.
+* Mock `->expects(...)` expectations work in both approaches, in both directions — satisfied or violated only after
+  the test's first sleep/IO yield. _PHPUnit_ 8/9 verify **every** registered mock from _runBare()_, right after the
+  test method returns — and the verification is not read-only: `__phpunit_verify()` also resets each mock (the
+  matcher gate only controls the per-mock assertion count). In the automatic approach that was never a problem: the
+  whole _runBare()_, verification included, runs inside the test's coroutine, so verdicts always cover the finished
+  body — a violation after a yield lands in the deferred end-of-run block with exit code 1, this branch's usual
+  post-yield failure model. In the manual approach — whose _runBare()_ is _PHPUnit_'s own, running on the main
+  coroutine — the verification used to fire at the callable's first yield: an expectation satisfied only later
+  failed prematurely, a satisfied mock was stripped so a later `never()` violation (or exceeded count) passed
+  silently with exit code 0, and even a matcher-less _createMock()_/_createStub()_ used as a plain stub lost its
+  `willReturn()` configuration mid-body (post-yield stubbed calls returned null). _Counit::create()_ now joins a
+  manual-approach test that has **any** registered mock at its first yield — deliberately wider than the 1.x
+  branch's invocation-count-rule gate, mirroring _PHPUnit_ 8/9's verify-everything loop — so the native
+  verification covers the truly finished body. Notes:
+  * Only manual-approach tests that registered a test double lose their own concurrency; every other test still
+    overlaps with them. Automatic-approach tests are never joined for this — they need no fix.
+  * A mock created only **after** the callable's first yield is invisible at the join decision and is never
+    verified at all (the usual declared-after-yield carve-out); create and configure mocks before the first
+    sleep/IO call.
+  * The detection reads _PHPUnit_'s internal mock registry (one private property, of the same name and shape on
+    _PHPUnit_ 8.0 through 9.6); should a future release change it, _counit_ prints a notice once and degrades to
+    the previous behavior — loud, never silent.
 * Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
   with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
 

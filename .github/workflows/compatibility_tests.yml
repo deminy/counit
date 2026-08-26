@@ -402,6 +402,81 @@ jobs:
             esac
           done
 
+      - name: Test Mock Expectation Verification
+        # PHPUnit 8/9 verify EVERY registered mock from runBare(), right after the test method
+        # returns. The automatic approach was never broken here -- the whole runBare(),
+        # verification included, runs inside the test's coroutine, so verdicts always cover the
+        # finished body (a post-yield violation lands in the deferred block with exit 1; the
+        # Automatic target pins that). The manual approach had the 1.x defect, worse on this
+        # branch: verification fired at the callable's first yield, false-failing a
+        # not-yet-satisfied expectation -- and, since __phpunit_verify() also RESETS every
+        # registered mock (the matcher gate only controls the assertion count), a satisfied
+        # mock's rules and even a plain stub's willReturn() configuration were stripped
+        # mid-body: post-yield violations passed silently and stubbed calls returned null.
+        # Counit::create() now joins a manual-approach test that has any registered mock at its
+        # first yield (see MockExpectations), so PHPUnit verifies the truly finished body and
+        # classifies natively in both directions. Identical output with and without Swoole,
+        # except the documented residual: a mock created only after the first yield is invisible
+        # at the join decision and stays unverified.
+        run: |
+          for target in MockExpectationManualTest MockSetUpManualTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/mock.log 2> /tmp/mock.err || rc=$?
+            cat /tmp/mock.log /tmp/mock.err
+            test "$rc" -eq 0
+            # Nothing may surface in a deferred end-of-run block: every covered verdict is
+            # native.
+            ! grep -qF 'already been reported as passed' /tmp/mock.err
+            case "$target" in
+              MockExpectationManualTest) grep -qF 'OK (4 tests, 4 assertions)' /tmp/mock.log ;;
+              MockSetUpManualTest)       grep -qF 'OK (1 test, 1 assertion)' /tmp/mock.log ;;
+            esac
+          done
+          # Genuine violations stay native failures -- in both directions: an expectation never
+          # satisfied, and a never() expectation violated only after a yield (the shape that
+          # passed silently before the fix).
+          for target in MockFailureManualTest MockNeverViolatedManualTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/mock-fail.log 2> /tmp/mock-fail.err || rc=$?
+            cat /tmp/mock-fail.log /tmp/mock-fail.err
+            test "$rc" -eq 1
+            ! grep -qF 'already been reported as passed' /tmp/mock-fail.err
+            case "$target" in
+              MockFailureManualTest)
+                grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/mock-fail.log
+                grep -qF 'actually called 0 times' /tmp/mock-fail.log ;;
+              MockNeverViolatedManualTest)
+                grep -qF 'Tests: 1, Assertions: 0, Failures: 1.' /tmp/mock-fail.log
+                grep -qF 'was not expected to be called' /tmp/mock-fail.log ;;
+            esac
+          done
+          # The automatic approach's post-yield violation: native failure in blocking mode, the
+          # deferred block plus exit 1 under Swoole -- never a silent pass.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/MockAutomaticViolationTest.php > /tmp/mock-auto.log 2> /tmp/mock-auto.err || rc=$?
+          cat /tmp/mock-auto.log /tmp/mock-auto.err
+          test "$rc" -eq 1
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'OK (1 test, 0 assertions)' /tmp/mock-auto.log
+            grep -qF 'was not expected to be called' /tmp/mock-auto.err
+          else
+            grep -qF 'Tests: 1, Assertions: 0, Failures: 1.' /tmp/mock-auto.log
+            grep -qF 'was not expected to be called' /tmp/mock-auto.log
+          fi
+          # Documented residual: a manual-approach mock created only after the first yield is
+          # never verified under Swoole (blocking mode fails the test).
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/MockLateCreationManualTest.php > /tmp/mock-late.log 2>&1 || rc=$?
+          cat /tmp/mock-late.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 0
+            grep -qF 'OK (1 test, 1 assertion)' /tmp/mock-late.log
+          else
+            test "$rc" -eq 1
+            grep -qF 'Tests: 1, Assertions: 2, Failures: 1.' /tmp/mock-late.log
+            grep -qF 'actually called 0 times' /tmp/mock-late.log
+          fi
+
       - name: Test Useless-Test Detection
         # The "did not perform any assertions" risky check (and its mirror, the
         # doesNotPerformAssertions-annotation check) reads the count the moment runBare()
