@@ -142,6 +142,52 @@ class TestCase extends BaseTestCase
     }
 
     /**
+     * Puts the after-test hook takeover back into a clean, consistent state after PHPUnit
+     * restored a #[BackupStaticProperties] snapshot. counit's classes are user-defined and not on
+     * PHPUnit's exclude list, so such a snapshot captures $takenOverAfterHookState and
+     * $relocatedAfterHooks -- and the restore replaces them with serialize()/unserialize()
+     * CLONES: the 'collection' entries no longer refer to the HookMethodCollection objects
+     * PHPUnit's own HookMethods cache holds (those, being PHPUnit-namespaced, are excluded from
+     * the snapshot and keep whatever method list was last written to them). Left alone, the next
+     * suppression flip would act on the dead clones while the real collections keep their stale
+     * lists -- concretely: after a joined backed-up test (whose join hands the hooks back to the
+     * native invocation), tearDown() would run twice for every later test of the class, once
+     * natively and once through the relocated replay.
+     *
+     * The repair: point every taken-over class's REAL collection (re-fetched through PHPUnit's
+     * cache) back at its original method list, then forget all takeover state, so each class's
+     * next test re-derives the takeover from scratch through the lazy path. Idempotent, and
+     * correct regardless of whether the restored state predates or postdates the takeover of any
+     * given class (a first-of-class backed-up test leaves no entry at all -- its join already
+     * restored the native invocation, which is exactly the state the lazy path expects).
+     *
+     * @internal called by CounitExtension at the Test\Finished event of a test that backed up
+     *           static properties; not part of counit's public API
+     */
+    public static function repairAfterStaticRestore(): void
+    {
+        foreach (self::$takenOverAfterHookState as $className => $state) {
+            // Always true (only TestCase subclasses ever register state); narrows the key for
+            // PHPUnit's class-string<TestCase> parameter type.
+            if (!is_subclass_of($className, BaseTestCase::class)) {
+                continue;
+            }
+
+            try {
+                $collection = (new HookMethods())->hookMethods($className)['after'];
+                (new \ReflectionProperty(HookMethodCollection::class, 'hookMethods'))->setValue($collection, $state['original']);
+            } catch (\Throwable) {
+                // Leave that class alone: its next takeover attempt self-checks and degrades
+                // loudly (see takeOverAfterTestHooks()) rather than silently double-running or
+                // dropping hooks.
+            }
+        }
+
+        self::$takenOverAfterHookState = [];
+        self::$relocatedAfterHooks     = [];
+    }
+
+    /**
      * {@inheritDoc}
      *
      * PHPUnit 10+ made TestCase::runBare() final, so the per-test coroutine wrapping is now
@@ -192,7 +238,16 @@ class TestCase extends BaseTestCase
             // must have truly finished before this method returns for the measured window -- and
             // the alarm's SIGALRM, which is delivered to whichever coroutine resumes first -- to
             // be correct. The run is serialized for the duration; see TimeLimit.
-            if (DependencyMap::isProducer(static::class, $this->name()) || TimeLimit::enforcedForRun()) {
+            // A test PHPUnit brackets with a global-state snapshot (#[BackupGlobals],
+            // #[BackupStaticProperties], the equivalent configuration, or
+            // #[WithEnvironmentVariable]) is joined too, so the restore -- issued by runBare()
+            // right before it returns -- follows the real body and the natively-run after-test
+            // hooks. The other half of that support, draining all in-flight coroutines BEFORE
+            // the snapshot, lives in CounitExtension's PreparationStarted subscriber; see
+            // GlobalState for the whole design.
+            if (DependencyMap::isProducer(static::class, $this->name())
+                || TimeLimit::enforcedForRun()
+                || GlobalState::isBackedUp(static::class, $this->name())) {
                 // The body will have fully run before this method returns, so PHPUnit's own
                 // after-test hook timing is correct again for this one test: hand the hooks back
                 // to the native invocation, which also restores its exact error semantics -- a

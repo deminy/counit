@@ -53,14 +53,19 @@ final class CounitExtension implements Extension
     #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
-        // This is the same Configuration instance TestRunner reads its time-limit settings from,
-        // handed over through the sanctioned extension seam -- no reflection into PHPUnit's
-        // @internal configuration Registry needed.
+        // This is the same Configuration instance TestRunner reads its time-limit settings from
+        // (and TestBuilder its backup defaults), handed over through the sanctioned extension
+        // seam -- no reflection into PHPUnit's @internal configuration Registry needed.
         TimeLimit::initialize($configuration);
+        GlobalState::initialize($configuration);
 
         if (Helper::isCoroutineFriendly()) {
             if (TimeLimit::enforcedForRun()) {
                 TimeLimit::announceSerializedRun();
+            }
+
+            if (GlobalState::configBacksUpEveryTest()) {
+                GlobalState::announceSerializedRun();
             }
 
             // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine
@@ -91,6 +96,28 @@ final class CounitExtension implements Extension
 
                     if ($test->isTestMethod()) {
                         Attribution::installShims($test->className());
+
+                        // The barrier half of the #[BackupGlobals]/#[BackupStaticProperties]/
+                        // #[WithEnvironmentVariable] support (see GlobalState): drain every
+                        // in-flight test coroutine BEFORE PHPUnit takes this test's global-state
+                        // snapshot. This event is emitted inside runBare(), three lines before
+                        // the snapshot -- the last seam early enough: draining any later would
+                        // let tests finish (and mutate globals) inside the snapshot window,
+                        // where the restore reverts their writes. Ordering matters twice more:
+                        // the drain runs BEFORE Attribution::testStarting() below, so the
+                        // draining coroutines' assertions stay attributed to their own tests --
+                        // and the assertion counter was already reset for this test (in
+                        // TestRunner::run(), before runBare()), so those assertions land in an
+                        // open window: mis-attributed to this test in PHPUnit's own bookkeeping
+                        // but never wiped, exactly the bucket the end-of-run total correction
+                        // already handles.
+                        if (GlobalState::isBackedUp($test->className(), $test->methodName())) {
+                            Attribution::suspended();
+                            while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
+                                Coroutine::sleep(0.01);
+                            }
+                            Attribution::resumed();
+                        }
                     }
 
                     Attribution::testStarting($test->id());
@@ -151,6 +178,15 @@ final class CounitExtension implements Extension
 
                     if ($test->isTestMethod()) {
                         JunitXmlCorrector::recordTest($test->className(), $test->name(), $test->id());
+
+                        // A test that backed up static properties has just had counit's own
+                        // static state rewound and cloned by PHPUnit's restore (counit's classes
+                        // are user-defined and not on PHPUnit's exclude list). This event fires
+                        // after that restore; put the after-test hook takeover back on real
+                        // objects before the next test consults it. See the method's docblock.
+                        if (GlobalState::backsUpStaticProperties($test->className(), $test->methodName())) {
+                            TestCase::repairAfterStaticRestore();
+                        }
                     }
                 }
             });

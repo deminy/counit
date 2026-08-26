@@ -210,6 +210,54 @@ jobs:
           cat /tmp/time-limit-risky.log
           test "$rc" -eq 1
 
+      - name: Test Global-State Backup Semantics
+        # #[BackupGlobals]/#[BackupStaticProperties]/#[WithEnvironmentVariable]: PHPUnit snapshots
+        # at the top of runBare() and restores at its bottom, which under Swoole used to be the
+        # body's first yield -- the test's own pre-yield mutations (an injected env var included)
+        # were reverted mid-body, its post-yield mutations leaked, on the join paths the restore
+        # wiped concurrent tests' global writes, and a static-properties snapshot rewound counit's
+        # own bookkeeping (skewing the assertion total and double-running later tearDown()s).
+        # counit now drains all in-flight coroutines before the snapshot (at PreparationStarted,
+        # the seam just ahead of it), joins the backed-up test so the restore follows the real
+        # body, and repairs its hook-takeover state after a static-properties restore. The
+        # expected output is identical with and without Swoole, including under a run-wide
+        # --globals-backup (which honestly serializes, with a notice under Swoole) and under
+        # --strict-global-state (whose before/after comparison now brackets the same exclusive
+        # window as in blocking mode).
+        run: |
+          for target in BackupGlobalsTest BackupGlobalsManualTest BackupCollateralTest BackupStaticHooksTest WithEnvironmentVariableTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/backup.log 2> /tmp/backup.err || rc=$?
+            cat /tmp/backup.log /tmp/backup.err
+            test "$rc" -eq 0
+            # Nothing may surface as a deferred end-of-run failure.
+            ! grep -qF 'already been reported as passed' /tmp/backup.err
+            case "$target" in
+              BackupGlobalsTest)           grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup.log ;;
+              BackupGlobalsManualTest)     grep -qF 'OK (2 tests, 3 assertions)' /tmp/backup.log ;;
+              BackupCollateralTest)        grep -qF 'OK (3 tests, 3 assertions)' /tmp/backup.log ;;
+              BackupStaticHooksTest)       grep -qF 'OK (4 tests, 4 assertions)' /tmp/backup.log ;;
+              WithEnvironmentVariableTest) grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup.log ;;
+            esac
+          done
+          # Run-wide backup configuration: same exact output, serialized under Swoole (notice).
+          rc=0
+          ./counit -c phpunit.xml.dist --globals-backup tests/regression/BackupGlobalsTest.php > /tmp/backup-cfg.log 2> /tmp/backup-cfg.err || rc=$?
+          cat /tmp/backup-cfg.log /tmp/backup-cfg.err
+          test "$rc" -eq 0
+          grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup-cfg.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'the run is serialized' /tmp/backup-cfg.err
+          fi
+          # --strict-global-state: the mutating backed-up test is flagged risky, natively, in
+          # both modes -- its comparison snapshots now bracket the same exclusive window.
+          rc=0
+          ./counit -c phpunit.xml.dist --strict-global-state tests/regression/BackupGlobalsTest.php > /tmp/backup-strict.log 2>&1 || rc=$?
+          cat /tmp/backup-strict.log
+          test "$rc" -eq 0
+          grep -qF 'Tests: 2, Assertions: 4, Risky: 1.' /tmp/backup-strict.log
+          grep -qF 'This test modified global state but was not expected to do so' /tmp/backup-strict.log
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

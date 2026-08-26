@@ -221,7 +221,18 @@ class Counit
             // duration; failures land synchronously in PHPUnit's native handling, exactly as in
             // blocking mode, and no assertion credit is needed -- PHPUnit reads the real, final
             // count. See TimeLimit.
-            if (TimeLimit::enforcedForRun() || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            // A manual-approach test PHPUnit brackets with a global-state snapshot
+            // (#[BackupGlobals], #[BackupStaticProperties], the equivalent configuration, or
+            // #[WithEnvironmentVariable]) is joined for the same body-must-truly-finish reason:
+            // the restore fires when runBare() returns and must follow the real body. The
+            // matching pre-snapshot drain lives in CounitExtension; see GlobalState. As on the
+            // other join paths no assertion credit is applied (this branch returns before
+            // creditCaller()) -- the joined body's real assertions are counted natively before
+            // PHPUnit reads them, so a backed-up test performing no assertions stays risky,
+            // exactly as in blocking mode.
+            if (TimeLimit::enforcedForRun()
+                || ($caller instanceof TestCase
+                    && (ExceptionExpectations::isRegisteredFor($caller) || GlobalState::isBackedUp($caller::class, $caller->name())))) {
                 if ($onJoin !== null) {
                     $onJoin();
                 }

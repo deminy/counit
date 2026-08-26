@@ -344,6 +344,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
 | `--fail-on-risky` / `--fail-on-incomplete` / `--fail-on-skipped` | ✅ | ✅ |
 | `--enforce-time-limit` (with `--default-time-limit`, `#[Small]`/`#[Medium]`/`#[Large]`) | ✅ exact — every test is joined at its first yield while the option is active, so PHPUnit times the real `runBare()` and reports a timeout natively (risky verdict, `--fail-on-risky` honored), in both approaches. The run is serialized for the duration: with the option, counit gives PHPUnit's timings and PHPUnit's speed (a STDERR notice announces this). Needs `ext-pcntl`, as under plain _PHPUnit_; marginally more lenient at the exact boundary (see notes) | ✅ same join fix (with `@small`/`@medium`/`@large` annotations) — PHPUnit 8/9's identical `pcntl_alarm()` guard over `runBare()` then times and reports natively; the risky verdict carries php-invoker's "Execution aborted" message, and the aborted test is flagged risky twice there (the abort plus its missing assertions) |
+| `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` (incl. the `backupGlobals`/`backupStaticProperties` configuration, the `Exclude*FromBackup` attributes and `--strict-global-state`) | ✅ exact — a test PHPUnit brackets with a global-state snapshot is joined at its first yield, and every other test's coroutine is drained **before** its snapshot is taken, so PHPUnit's own snapshot/restore covers the real test body with nothing else running. Such a test gets no concurrency of its own and awaits everything already in flight; every other test still overlaps. A run configured with `backupGlobals="true"` / `--globals-backup` (or the static-properties equivalent) therefore serializes completely (STDERR notice). `#[BackupGlobals(false)]` cannot override a configuration-level `true` — upstream _PHPUnit_ behavior, mirrored | ❌ (annotations `@backupGlobals`/`@backupStaticAttributes`; `#[WithEnvironmentVariable]` does not exist on _PHPUnit_ 8/9) — a different failure profile: the whole `runBare()` runs inside the coroutine there, so the test's own isolation is correct, but the snapshot spans its entire concurrent lifetime and the restore reverts every global write made by any overlapping test. Fix not yet ported |
 | Exit code as the pass/fail signal | ✅ authoritative (failures after a yield force a non-zero exit) | ✅ |
 
 ## Incompatible features
@@ -354,7 +355,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `expectOutputString()` / `expectOutputRegex()` with output **after** a yield | ❌ one shared output buffer across all coroutines | ❌ |
 | `markTestSkipped()` / `markTestIncomplete()` **after** a yield | ⚠️ status remains "passed"; listed in an end-of-run notice, exit code stays 0 | ⚠️ same |
 | Risky check "This test did not perform any assertions" | ❌ never flagged (suppressed by the up-front assertion credit, by design) | ❌ |
-| `#[BackupGlobals]` / `#[BackupStaticProperties]` / `#[WithEnvironmentVariable]` | ❌ snapshot/restore fires while other tests are mid-flight | ❌ (annotations) |
+| PHPUnit's error/exception-handler snapshot (the "test … did not remove its own exception handlers" risky check) | ❌ the handler stack is snapshotted and restored around `runBare()` — under counit, at the test's first yield — for **every** test: a handler registered after a yield is neither restored nor reported, and leaks into later tests. Covering it would mean joining every test | ❌ same |
 | `assertPostConditions()` | ❌ runs at the first yield, possibly before the body finished — except on a joined `#[Depends]` producer, whose whole after-test phase is PHPUnit's own | ✅ runs after the finished body |
 | Per-test reporting: per-testcase assertion counts and durations in `--log-junit`/`--log-otr` XML | ⚠️ JUnit counts are corrected via segment accounting: exact whenever the test's yields are observable (sleep()/usleep() in a namespaced test class, Counit::sleep()); a yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()`, a test class in the global namespace) leaves that test's count too low — never another test's too high. `--log-otr` counts are not corrected. A failure after a yield is logged as PASSED in either XML — trust the exit code, not the logs. No other output surface (CLI, TestDox, TeamCity) shows per-test assertion counts at all | ⚠️ same JUnit correction (segment accounting; exact for observable yields, own count too low otherwise); `--log-otr` does not exist on 0.x |
 | A `tearDown()` / `#[After]` hook that throws or skips | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error; a skip signalled from such a hook — a test **failure** under blocking _PHPUnit_, never a skip — is reported the same way. Fully native semantics apply on a joined `#[Depends]` producer and on a test whose `setUp()` threw or skipped (their hooks run natively) | ⚠️ a hook throw after a yield lands in the deferred block (before one, it errors the test natively); a hook **skip** is a genuine skip on _PHPUnit_ 8/9 — upstream semantics, exit code 0 — and 0.x honors it: natively before a yield, via the benign end-of-run notice after one. Joined producers' hooks are fully native there too |
@@ -461,6 +462,40 @@ faster, with limitations apply. Here is a list of limitations of this package:
     to return at the body's first yield), with two cosmetic differences: the risky verdict carries php-invoker's
     "Execution aborted after N seconds" message rather than _PHPUnit_'s "This test was aborted" wording, and
     _PHPUnit_ 8/9 count an aborted test's abort and its missing assertions as two risky entries.
+* Attributes `#[BackupGlobals]`, `#[BackupStaticProperties]` and `#[WithEnvironmentVariable]` (and the
+  `backupGlobals`/`backupStaticProperties` configuration) work with exact _PHPUnit_ semantics — at the price of the
+  backed-up test's concurrency. _PHPUnit_ takes the global-state snapshot (and sets the environment variables) at
+  the very top of _runBare()_ — before _setUp()_ — and restores at its very bottom. Under _counit_ that restore used
+  to fire at the body's first yield: the test's **own** pre-yield mutations (an injected environment variable
+  included) were reverted while the body still needed them, its post-yield mutations escaped the restore and leaked
+  for the rest of the run, and on the joined paths (a _#[Depends]_ producer, an _expectException()_ test, a
+  `--enforce-time-limit` run) the still-open window spanned the test's whole duration while other coroutines ran
+  inside it — whose global writes the restore then silently reverted. Worse, a `#[BackupStaticProperties]` snapshot
+  also captured _counit_'s **own** static bookkeeping (counit's classes are user-defined, so not on _PHPUnit_'s
+  exclude list), skewing the run's reported assertion total. The fix has two halves, because global state — unlike a
+  return value, an exception or an alarm — is process-wide: the backed-up test is *joined* at its first yield (the
+  _#[Depends]_-producer mechanism, so the restore follows the real body and the natively-run after-test hooks), and
+  before its snapshot is taken every in-flight test coroutine is *drained* (at the `Test\PreparationStarted` event,
+  emitted just ahead of the snapshot) — giving the snapshot/restore pair the exclusive window blocking _PHPUnit_
+  gets for free. Notes:
+  * A backed-up test first waits for everything already in flight, then runs serialized; every other test still
+    overlaps normally, and a suite with no backup requests is completely unaffected. When the *configuration* makes
+    every test backed up (`backupGlobals="true"`, `--globals-backup`, or the static-properties equivalent), the
+    whole run serializes — announced once on STDERR; silence it with _COUNIT_SILENCE_TEARDOWN_NOTICE=1_.
+  * `--strict-global-state` becomes correct as a side effect: both of its comparison snapshots now bracket the same
+    exclusive window, so it flags exactly the tests blocking _PHPUnit_ flags — no more missed post-yield mutations,
+    and no more false positives from bystanders' writes on the joined paths.
+  * After a `#[BackupStaticProperties]` restore, _counit_ repairs its own rewound after-test hook takeover state
+    (the restore replaces it with serialized clones); without the repair, _tearDown()_ would run twice for every
+    later test of the class. The joined path applies no up-front assertion credit, so totals stay exact and a
+    backed-up test performing no assertions stays risky, as under blocking _PHPUnit_.
+  * The resolution mirrors _PHPUnit_'s own, quirk included: a method-level attribute beats a class-level one, and
+    `#[BackupGlobals(false)]` merely declines to force backup on — it cannot override a configuration-level `true`.
+  * _PHPUnit_'s *unconditional* error/exception-handler snapshot — the "did not remove its own exception handlers"
+    risky check — is **not** covered: it brackets every test, so honoring it would mean joining every test. See its
+    own row in the incompatible-features table.
+  * A process-isolated test needs none of this and never did: isolation skips the snapshot machinery entirely (the
+    child process's mutations die with it), and `#[WithEnvironmentVariable]` still applies inside the child.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being
