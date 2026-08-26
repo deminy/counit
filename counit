@@ -158,17 +158,23 @@ if (extension_loaded('swoole') && !$repeatRequested) {
         fwrite(STDERR, PHP_EOL);
     }
 
-    // PHPUnit's --fail-on-risky/--fail-on-incomplete/--fail-on-skipped checks (and their XML
-    // configuration equivalents) live inside the `if ($exit)` block of TestRunner::run(), which
-    // the Command::main(false) call above skips on purpose -- exit() from inside a coroutine is
-    // intercepted by Swoole. PHPUnit then derives its return code from wasSuccessful() and
-    // errorCount() only, so a clean-but-risky (or incomplete/skipped) run would exit 0 here even
-    // though plain `phpunit` with the same options exits 1. Re-apply those checks, back in
-    // non-coroutine PHP, against the TestResult of the run. Notes: a run with warnings needs no
-    // handling ($code is already non-zero for it, since wasSuccessful() is false); this can only
-    // turn a 0 into a 1, never the other way around; and when no test ever created a coroutine,
-    // the TestResult was not captured and these options are not re-checked.
+    // PHPUnit's --fail-on-risky/--fail-on-incomplete/--fail-on-skipped/--fail-on-warning checks
+    // (and their XML configuration equivalents) live inside the `if ($exit)` block of
+    // TestRunner::run(), which the Command::main(false) call above skips on purpose -- exit()
+    // from inside a coroutine is intercepted by Swoole. Command's own fallback derivation is not
+    // equivalent: it reads wasSuccessful(), which counts warnings, so a warnings-only run comes
+    // back as 1 here while PHPUnit's native exit path (wasSuccessfulIgnoringWarnings(), plus the
+    // --fail-on-* re-checks) exits 0 for it -- and, conversely, a clean-but-risky (or
+    // incomplete/skipped/warned) run would exit 0 here even though plain `phpunit` with a
+    // --fail-on-* option exits 1. Align with the native behavior in both directions, back in
+    // non-coroutine PHP, against the TestResult of the run. When no test ever created a
+    // coroutine, the TestResult was not captured and neither correction applies.
     $testResult = Deminy\Counit\Counit::$testResult;
+    if ($code === 1 && $testResult !== null && $testResult->wasSuccessfulIgnoringWarnings()) {
+        // A warnings-only run: successful on PHPUnit's native exit path (the --fail-on-warning
+        // re-check below restores the opt-in failure).
+        $code = 0;
+    }
     if ($code === 0 && $testResult !== null) {
         $argv       = $_SERVER['argv'];
         $attributes = [];
@@ -213,6 +219,7 @@ if (extension_loaded('swoole') && !$repeatRequested) {
         if (($failOn('risky', 'failOnRisky') && !$testResult->allHarmless())
             || ($failOn('incomplete', 'failOnIncomplete') && $testResult->notImplementedCount() > 0)
             || ($failOn('skipped', 'failOnSkipped') && $testResult->skippedCount() > 0)
+            || ($failOn('warning', 'failOnWarning') && $testResult->warningCount() > 0)
         ) {
             $code = 1;
         }

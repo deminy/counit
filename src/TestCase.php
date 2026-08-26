@@ -88,8 +88,13 @@ class TestCase extends BaseTestCase
             // PHPUnit's own runBare() -- running inside the coroutine -- starts by zeroing the
             // test's assertion count, and would wipe a credit added ahead of it. By the time
             // create() returns, the coroutine has already run up to its first yield (or to
-            // completion), so that reset is behind us.
-            Counit::creditAssertionCount($this, 1);
+            // completion), so that reset is behind us. No credit when create() joined the
+            // coroutine because this test carries an exception expectation: the body has fully
+            // finished, so the expectation verification's own assertions are counted natively,
+            // before PHPUnit reads the count -- crediting on top would inflate it.
+            if (!Counit::lastCreateJoined()) {
+                Counit::creditAssertionCount($this, 1);
+            }
         } else {
             parent::runBare();
         }

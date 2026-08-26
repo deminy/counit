@@ -78,6 +78,17 @@ class Counit
     private static $appliedCredits = [];
 
     /**
+     * Whether the most recent create() call joined its coroutine because the calling test had an
+     * exception expectation registered at the first yield. TestCase::runBare() consults this to
+     * skip the up-front assertion credit for such a test: its body has fully finished, so the
+     * expectation verification's own assertions are counted natively, before PHPUnit reads the
+     * count. create() calls are made sequentially from the main coroutine, so one flag suffices.
+     *
+     * @var bool
+     */
+    private static $lastCreateJoined = false;
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -88,13 +99,16 @@ class Counit
      *                   expectNotToPerformAssertions() -- that it performs no assertions, since PHPUnit would
      *                   otherwise report the credited test as risky.
      * @return int return 0 if not running inside a coroutine, or when the callable was joined (run
-     *             to completion before returning) because something @depends on the calling test;
-     *             otherwise, return the coroutine ID, or -1 when failed creating a new coroutine
-     *             to run the tests
+     *             to completion before returning) because something @depends on the calling test
+     *             or because the calling test had an exception expectation registered at the
+     *             body's first yield; otherwise, return the coroutine ID, or -1 when failed
+     *             creating a new coroutine to run the tests
      */
     public static function create(callable $callable, int $count = 0): int
     {
         if (Helper::isCoroutineFriendly()) {
+            self::$lastCreateJoined = false;
+
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
             $method = isset($trace[1]['function']) ? (string) $trace[1]['function'] : '';
@@ -143,6 +157,9 @@ class Counit
 
             $caught          = null;
             $alreadyReturned = false;
+            $joining         = false;
+            $thrown          = null;
+            $done            = new Coroutine\Channel(1);
             $key             = ($caller instanceof TestCase) ? spl_object_id($caller) : null;
 
             if ($key !== null) {
@@ -154,7 +171,7 @@ class Counit
                 Attribution::claimMain($key);
             }
 
-            $id = Coroutine::create(function () use ($callable, $key, &$caught, &$alreadyReturned, $description): void {
+            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, $description): void {
                 Attribution::coroutineStarted($key);
 
                 try {
@@ -164,7 +181,12 @@ class Counit
                     // created; it is flipped to true (by reference) below, before a coroutine
                     // that yielded resumes and can reach this catch block.
                     if ($alreadyReturned) { // @phpstan-ignore if.alwaysFalse
-                        if (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
+                        if ($joining) { // @phpstan-ignore if.alwaysFalse
+                            // The caller is waiting for this coroutine (see the join below): hand
+                            // the Throwable over instead of deferring it, so it reaches PHPUnit
+                            // synchronously and its native handling applies.
+                            $thrown = $e;
+                        } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
                         } else {
                             self::$deferredFailures[$description] = $e;
@@ -174,6 +196,10 @@ class Counit
                     }
                 } finally {
                     Attribution::coroutineFinished();
+                    // Unconditional, so a join decided only after this coroutine already finished
+                    // (its whole body ran without yielding) still pops instantly instead of
+                    // blocking forever on an empty channel.
+                    $done->push(true);
                 }
             });
             $alreadyReturned = true;
@@ -184,6 +210,32 @@ class Counit
 
             if ($caught !== null) {
                 throw $caught;
+            }
+
+            // A test with a registered exception expectation cannot be allowed to merely start
+            // here: PHPUnit verifies the expectation the moment the test method invocation
+            // returns -- with the body still in flight it sees no Throwable and fails the test
+            // with "exception ... is thrown", while the real Throwable arrives later and can only
+            // be deferred (on this branch that bit the manual approach, and the automatic
+            // approach's expectWarning() family: PHPUnit's converting error handler is
+            // unregistered on the main coroutine before the test coroutine resumes). Joining
+            // keeps PHPUnit waiting -- error handler still registered -- and puts the Throwable
+            // back where its native verification expects it. The check happens here rather than
+            // before the spawn on purpose: expectException() is called inside the body, so the
+            // expectation only exists once the body has run to its first yield.
+            if ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller)) {
+                self::$lastCreateJoined = true;
+                $joining                = true;
+                Attribution::suspended();
+                $done->pop();
+                Attribution::resumed();
+
+                // Set by reference from inside the coroutine, which PHPStan cannot see.
+                if ($thrown !== null) { // @phpstan-ignore notIdentical.alwaysFalse
+                    throw $thrown;
+                }
+
+                return 0;
             }
 
             return ($id !== false) ? $id : -1; // @phpstan-ignore return.type
@@ -270,6 +322,15 @@ class Counit
         }
 
         return $result;
+    }
+
+    /**
+     * Whether the most recent create() call joined its coroutine because the calling test had an
+     * exception expectation registered; see $lastCreateJoined.
+     */
+    public static function lastCreateJoined(): bool
+    {
+        return self::$lastCreateJoined;
     }
 
     /**

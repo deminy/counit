@@ -43,7 +43,7 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (42 tests, 47 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (48 tests, 58 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot change the test's status
@@ -150,6 +150,44 @@ jobs:
           grep -qF 'Tests: 3, Assertions: 2, Errors: 1, Skipped: 1.' /tmp/depends-td.log
           ! grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log
           ! grep -qF 'already been reported as passed' /tmp/depends-td.err
+
+      - name: Test Exception Expectation Semantics
+        # A test whose expected exception arrives only after a yield: the automatic approach
+        # already verified a MATCHING throw natively (the whole runBare() runs inside the
+        # coroutine), but its failing shapes were deferred, the manual approach failed
+        # prematurely with "exception not thrown" plus a deferred duplicate, and the
+        # expectWarning() family broke because PHPUnit's converting error handler was already
+        # unregistered when the coroutine resumed. With the expectation-join in Counit::create(),
+        # all of it reports exactly as under blocking PHPUnit: a mismatch fails with the real
+        # comparison message, a never-arriving exception fails natively after the finished body,
+        # a tearDown() throwing the very class the test expects ERRORS the test, and a delayed
+        # warning converts and verifies. Identical with and without Swoole; the passing shapes
+        # live in the exact-summary-gated suite above. The warning run's summary is asserted
+        # with an alternation: PHPUnit >= 9.5 adds a deprecation warning about expecting
+        # E_WARNING that older versions do not emit.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/ExceptionFailureTest.php > /tmp/exception-fail.log 2> /tmp/exception-fail.err || rc=$?
+          cat /tmp/exception-fail.log /tmp/exception-fail.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 4, Assertions: 4, Errors: 1, Failures: 2.' /tmp/exception-fail.log
+          grep -qF 'matches expected exception "RuntimeException"' /tmp/exception-fail.log
+          grep -qF 'Failed asserting that exception of type "RuntimeException" is thrown.' /tmp/exception-fail.log
+          grep -qF 'deliberate tearDown() throw of the very class the test expects' /tmp/exception-fail.log
+          ! grep -qF 'already been reported as passed' /tmp/exception-fail.err
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/ExceptionFailureManualTest.php > /tmp/exception-manual.log 2> /tmp/exception-manual.err || rc=$?
+          cat /tmp/exception-manual.log /tmp/exception-manual.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 2, Assertions: 2, Failures: 2.' /tmp/exception-manual.log
+          grep -qF 'matches expected exception "RuntimeException"' /tmp/exception-manual.log
+          ! grep -qF 'already been reported as passed' /tmp/exception-manual.err
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/WarningAfterYieldTest.php > /tmp/warning.log 2> /tmp/warning.err || rc=$?
+          cat /tmp/warning.log /tmp/warning.err
+          test "$rc" -eq 0
+          grep -qE '^(OK \(1 test, 1 assertion\)|Tests: 1, Assertions: 1, Warnings: 1\.)$' /tmp/warning.log
+          ! grep -qF 'already been reported as passed' /tmp/warning.err
 
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are read from each test object as

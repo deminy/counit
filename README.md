@@ -242,6 +242,11 @@ in the meantime), so a value computed inside it can be returned from the test me
 real. Alternatively, _Counit::createAndJoin()_ returns the callback's value (and rethrows its failure) directly. See
 [Additional Notes](#additional-notes).
 
+The same join applies to a test that has an exception expectation registered — _expectException()_ and friends,
+declared before the _Counit::create()_ call as usual: the callback's Throwable is rethrown synchronously into
+_PHPUnit_'s native verification, so an exception thrown only after a sleep/IO yield matches (or mismatches) exactly
+as under plain _PHPUnit_, with no test changes. See [Additional Notes](#additional-notes).
+
 To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
@@ -363,6 +368,20 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * The whole-class form (`@depends Class::class`) requires _PHPUnit_ >= 9.3; older versions (with or without
     _counit_) warn that the target does not exist. A producer using a data provider passes _NULL_ to its
     dependents — under plain _PHPUnit_ 8/9 too; upstream behavior, not a _counit_ limitation.
+* Method _expectException()_ and its friends work with exact _PHPUnit_ semantics even when the expected exception is
+  thrown only after the test's first sleep/IO yield. The automatic approach already verified a matching throw
+  natively — the whole _runBare()_ runs inside the coroutine — but its failing shapes surfaced only via the deferred
+  end-of-run block, the manual approach failed prematurely with "exception not thrown" plus a deferred duplicate,
+  and a warning/notice/deprecation expectation (_PHPUnit_ 9's _expectWarning()_ family, or
+  _expectException()_ with _PHPUnit_'s _Warning_ class) broke outright: _PHPUnit_'s converting error handler is
+  registered around _runBare()_ on the main coroutine and was already unregistered by the time the test's coroutine
+  resumed. _Counit::create()_ now checks for a registered expectation once the body reaches its first yield and
+  *joins* the coroutine — the same mechanism as for a _@depends_ producer: _PHPUnit_ keeps waiting (error handler
+  still registered), the real Throwable is rethrown synchronously into its native verification, and match, mismatch,
+  and never-thrown all report exactly as in blocking mode, in both approaches. No assertion credit is applied on the
+  join path (the verification counts its own assertions), and only expectation-carrying tests that yield lose their
+  own concurrency. An expectation declared only **after** the test's first yield is invisible at the join decision
+  and keeps the old behavior — declare expectations before the first sleep/IO call.
 * The timing of _tearDown()_ differs between the two approaches:
   * **The automatic approach** runs the whole test lifecycle — _setUp()_, the test method, and _tearDown()_ — inside
     one coroutine, so _tearDown()_ always observes a finished test body, exactly as under plain _PHPUnit_.
