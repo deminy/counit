@@ -105,6 +105,52 @@ jobs:
             ! grep -qF 'already been reported as passed' /tmp/depends-class.err
           fi
 
+      - name: Test After-Test Hook Semantics
+        # These behaviors hold by architecture on this branch (the whole runBare() -- setUp(),
+        # body, tearDown() -- runs inside the test's coroutine, so PHPUnit's own hook handling
+        # applies untouched), while the 1.x branch needed dedicated fixes for them; the guards
+        # pin that no future change here loses them. (1) A test whose setUp() throws or skips
+        # still gets its tearDown(), and a tearDown() Throwable after the failed setUp() stays
+        # swallowed -- identical output with and without Swoole. (2) A skip signalled from
+        # tearDown() after a passing body is a GENUINE skip on PHPUnit 8/9 (upstream semantics,
+        # unlike PHPUnit 10+ where it fails the test): the run must exit 0 in BOTH modes -- the
+        # pre-yield skip honored natively, the post-yield one via the benign end-of-run notice.
+        # This deliberately guards against ever porting the 1.x branch's exit-1 treatment (its
+        # f5cbf24) to this branch. (3) A joined producer's tearDown() throw errors the producer
+        # natively and skips its dependent -- identical in both modes, no deferred block.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/SetUpFailureHooksTest.php > /tmp/setup-fail.log 2> /tmp/setup-fail.err || rc=$?
+          cat /tmp/setup-fail.log /tmp/setup-fail.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 4, Assertions: 3, Errors: 1, Skipped: 1.' /tmp/setup-fail.log
+          # tearDown() must have run for both aborted tests (the guard test fails otherwise) ...
+          ! grep -qF 'tearDown() must run' /tmp/setup-fail.log
+          # ... its own post-setUp-failure Throwable must be swallowed ...
+          ! grep -qF 'must be swallowed' /tmp/setup-fail.log
+          ! grep -qF 'must be swallowed' /tmp/setup-fail.err
+          # ... and nothing may surface as a deferred end-of-run failure.
+          ! grep -qF 'already been reported as passed' /tmp/setup-fail.err
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/TearDownSkipTest.php > /tmp/teardown-skip.log 2> /tmp/teardown-skip.err || rc=$?
+          cat /tmp/teardown-skip.log /tmp/teardown-skip.err
+          test "$rc" -eq 0
+          ! grep -qF 'already been reported as passed' /tmp/teardown-skip.err
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/teardown-skip.log
+            grep -qF 'status remains "passed":' /tmp/teardown-skip.err
+            grep -qF 'TearDownSkipTest::testPostYieldSkipFromTearDown' /tmp/teardown-skip.err
+          else
+            grep -qF 'Tests: 2, Assertions: 2, Skipped: 2.' /tmp/teardown-skip.log
+          fi
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/DependsTearDownTest.php > /tmp/depends-td.log 2> /tmp/depends-td.err || rc=$?
+          cat /tmp/depends-td.log /tmp/depends-td.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 3, Assertions: 2, Errors: 1, Skipped: 1.' /tmp/depends-td.log
+          ! grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log
+          ! grep -qF 'already been reported as passed' /tmp/depends-td.err
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are read from each test object as
         # PHPUnit reports it, so under Swoole they used to carry the up-front assertion credit (one
