@@ -88,6 +88,14 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
             // report, and hold whatever the test's counting window happened to catch. The logger
             // buffers the report and only writes it from flush(), which TestResult::flushListeners()
             // triggers after this hook has run.
+            // Emit the "did not perform any assertions" verdicts (and their mirror) PHPUnit
+            // could not reach on its own, now that every coroutine has drained and the per-test
+            // tallies are final. This hook runs before the result printer writes its footer, so
+            // a RiskyTestError handed to TestResult::addFailure() here still enters the risky
+            // list, the summary's Risky count, and -- through the `counit` script's exit-code
+            // alignment -- the --fail-on-risky exit code.
+            UselessTests::emitDeferred();
+
             JunitXmlCorrector::correct();
 
             $this->correctAssertionCount(

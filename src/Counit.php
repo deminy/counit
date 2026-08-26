@@ -89,6 +89,18 @@ class Counit
     private static $lastCreateJoined = false;
 
     /**
+     * Whether the most recent create() call's coroutine ran to completion before create()
+     * returned -- i.e. the body never yielded. The count PHPUnit is about to read is then
+     * already final, so no assertion credit is needed (or wanted: it would suppress the native
+     * "did not perform any assertions" verdict for a test that genuinely performed none). Like
+     * $lastCreateJoined, a single flag suffices: create() calls are sequential on the main
+     * coroutine.
+     *
+     * @var bool
+     */
+    private static $lastCreateFinished = false;
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -107,7 +119,8 @@ class Counit
     public static function create(callable $callable, int $count = 0): int
     {
         if (Helper::isCoroutineFriendly()) {
-            self::$lastCreateJoined = false;
+            self::$lastCreateJoined   = false;
+            self::$lastCreateFinished = false;
 
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
@@ -158,14 +171,11 @@ class Counit
                 && !($caller instanceof \Deminy\Counit\TestCase)
                 && PostConditions::isCustomizedFor(get_class($caller));
 
-            if ($count > 0) {
-                if ($caller instanceof TestCase) {
-                    if (!$joinForTimeLimit && !$joinForGlobalState && !$joinForPostConditions) {
-                        self::creditAssertionCount($caller, $count);
-                    }
-                } else {
-                    throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
-                }
+            // Validation stays ahead of the spawn, so a misuse still fails before a coroutine is
+            // created; the credit itself is applied only after the spawn (see below), once it is
+            // known whether the body already ran to completion.
+            if ($count > 0 && !$caller instanceof TestCase) {
+                throw new Exception(sprintf('Method "%s" should be called directly in a test method of a %s object.', __METHOD__, TestCase::class));
             }
 
             $description = $caller instanceof TestCase
@@ -174,6 +184,7 @@ class Counit
 
             $caught          = null;
             $alreadyReturned = false;
+            $finished        = false;
             $joining         = false;
             $thrown          = null;
             $done            = new Coroutine\Channel(1);
@@ -199,7 +210,7 @@ class Counit
                 Attribution::claimMain($key);
             }
 
-            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
+            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($key);
                 $obHandle = $captureOutput ? OutputCapture::start() : null;
 
@@ -217,8 +228,10 @@ class Counit
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
+                            self::markAbortedAfterReport($key);
                         } else {
                             self::$deferredFailures[$description] = $e;
+                            self::markAbortedAfterReport($key);
                         }
                     } else {
                         $caught = $e;
@@ -239,6 +252,8 @@ class Counit
                         }
                     }
 
+                    $finished = true;
+
                     Attribution::coroutineFinished();
                     // Unconditional, so a join decided only after this coroutine already finished
                     // (its whole body ran without yielding) still pops instantly instead of
@@ -249,8 +264,11 @@ class Counit
             $alreadyReturned = true;
 
             // The calling coroutine is running again (the child finished or yielded): re-claim
-            // the assertion counter for whichever test it is running.
+            // the assertion counter for whichever test it is running. Remember whether the body
+            // already ran to completion -- TestCase::runBare() reads this to skip the automatic
+            // approach's credit for a never-yielding body, whose count is already final.
             Attribution::resumed();
+            self::$lastCreateFinished = $finished;
 
             if ($caught !== null) {
                 // The body threw before ever yielding; whatever it echoed first is already
@@ -304,6 +322,19 @@ class Counit
                 && !($caller instanceof \Deminy\Counit\TestCase)
                 && method_exists($caller, 'hasExpectationOnOutput')
                 && $caller->hasExpectationOnOutput();
+
+            // The requested credit is applied only now, after the spawn: a body that ran to
+            // completion without ever yielding needs no credit -- PHPUnit is about to read the
+            // test's real, final count, exactly as in blocking mode -- so a test that genuinely
+            // performed no assertions is flagged risky natively, at the right moment, and one
+            // that did assert is not inflated. The join paths resolved before the spawn decline
+            // it as before (the joined body's real assertions are counted natively); the joins
+            // decided below (exception/output expectations) keep the credit, exactly as they
+            // always did -- the run total stays exact either way through the credits correction.
+            if ($count > 0 && $caller instanceof TestCase && !$finished
+                && !$joinForTimeLimit && !$joinForGlobalState && !$joinForPostConditions) {
+                self::creditAssertionCount($caller, $count);
+            }
 
             if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || $joinForOutput || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
@@ -448,6 +479,15 @@ class Counit
     }
 
     /**
+     * Whether the most recent create() call's coroutine finished before create() returned; see
+     * $lastCreateFinished.
+     */
+    public static function lastCreateFinished(): bool
+    {
+        return self::$lastCreateFinished;
+    }
+
+    /**
      * Credit a test with assertions it has not performed yet, and record the credit in the ledger
      * CounitExtension subtracts again at the end of the run (see $creditedAssertionCount).
      *
@@ -533,5 +573,20 @@ class Counit
         }
 
         return max(0, $emitted - $credit + $late);
+    }
+
+    /**
+     * A test whose body failed, skipped or went incomplete only after PHPUnit had already
+     * reported it (see $deferredFailures/$deferredSkips). PHPUnit 8/9 exempt every
+     * non-passing test from the "did not perform any assertions" check, so the deferred pass
+     * must exempt them too; see UselessTests.
+     *
+     * @param int|null $key
+     */
+    private static function markAbortedAfterReport($key): void
+    {
+        if ($key !== null) {
+            UselessTests::markAborted($key);
+        }
     }
 }

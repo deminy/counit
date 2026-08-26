@@ -342,14 +342,34 @@ faster, with limitations apply. Here is a list of limitations of this package:
   the top of the test body) are supported in both approaches: such tests report clean with zero assertions, same as
   under _PHPUnit_. Remaining limitations, both consequences of the risky verdict being rendered when the test's
   coroutine first yields:
-  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is not
-    flagged risky under _counit_, while _PHPUnit_ flags it. Run totals stay exact either way, and a *failing* late
-    assertion still fails the run.
+  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is
+    flagged risky through the deferred end-of-run pass described in the risky-check bullet below — provided its
+    yields are observable; one resumed at a point _counit_ cannot observe stays silent. Run totals stay exact
+    either way, and a *failing* late assertion still fails the run.
   * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
     risky occasionally — the internal counting-window effect above (the corrected JUnit report is not affected by
     it).
   * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
     method-level annotation is honored), with or without _counit_.
+* The risky check "This test did not perform any assertions" works with near-exact _PHPUnit_ semantics. The check is
+  decided from the count _PHPUnit_ reads the moment _runBare()_ returns — under _counit_, the body's first yield —
+  and whether the still-running body will assert later is unknowable at that instant; that is why _counit_ credits
+  one assertion up front (suppressing FALSE risky verdicts for post-yield assertions), which used to also suppress
+  every TRUE one. Two mechanisms now restore the true verdicts:
+  * The credit is **declined whenever the body finished before its coroutine ever yielded** — the count is already
+    final, so _PHPUnit_ reaches the verdict natively, at the right moment, in both approaches.
+  * A yielding no-assertion test is reported at the **end of the run** by handing a `RiskyTestError` to the public
+    _TestResult::addFailure()_ — it appears in the risky listing with the test method's real location, counts into
+    `Risky: N`, and `--fail-on-risky` exits 1 exactly as in blocking mode. A test is only reported when _counit_
+    can *prove* its count: its coroutine must never have been resumed at a point _counit_ cannot observe (hooked
+    network/DB IO, a fully-qualified `\sleep()`, a test class in the global namespace — the same caveat documented
+    for the JUnit per-test counts), because such a test's own tally is an undercount and reporting it would be a
+    false accusation. Unprovable cases stay silent; tests _PHPUnit_ already flagged, tests that declared they
+    perform no assertions (those get the mirror "annotated but performed N assertions" check instead), and every
+    non-passing test — natively or only after its report — are exempt, mirroring _PHPUnit_ 8/9's own strict verdict
+    chain. The deferred verdicts sit at the end of the risky listing, a stray `R` progress character may trail the
+    progress line (the printer echoes late verdicts), and `--stop-on-risky` cannot react to them.
+    `--dont-report-useless-tests` disables all of it, as under _PHPUnit_.
 * Annotation _@depends_ (same-class, cross-class `Class::method`, and the `clone`/`shallowClone` options) works with
   exact _PHPUnit_ semantics in both approaches. _PHPUnit_ records a test's return value and verdict when its
   _runBare()_ returns — under _counit_, the coroutine's first yield: too early for either to be real. So when

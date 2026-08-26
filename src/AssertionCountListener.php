@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Test;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 use PHPUnit\Framework\TestListener;
 use PHPUnit\Framework\TestListenerDefaultImplementation;
 use PHPUnit\Framework\TestResult;
+use PHPUnit\Framework\Warning;
 use Swoole\Coroutine;
 
 /**
@@ -131,6 +133,82 @@ class AssertionCountListener implements TestListener
         }
 
         return isset(self::$instance->emitted[$key]) ? self::$instance->emitted[$key] : null;
+    }
+
+    /**
+     * The test objects this listener has seen end, keyed by spl_object_id(). The deferred
+     * no-assertions pass iterates them; see UselessTests.
+     *
+     * @return array<int, BaseTestCase>
+     */
+    public static function recordedTests(): array
+    {
+        return self::$instance === null ? [] : self::$instance->tests;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * The verdict listeners below feed UselessTests' exemption bookkeeping: PHPUnit 8/9 exempt
+     * every non-passing test from the "did not perform any assertions" check (TestResult's
+     * verdict chain is a strict elseif ladder), and a risky verdict PHPUnit already reached
+     * itself must not be repeated by the deferred pass.
+     */
+    public function addError(Test $test, \Throwable $t, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markAborted(spl_object_id($test));
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addFailure(Test $test, AssertionFailedError $e, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markAborted(spl_object_id($test));
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addWarning(Test $test, Warning $e, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markAborted(spl_object_id($test));
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addRiskyTest(Test $test, \Throwable $t, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markFlagged(spl_object_id($test), $t->getMessage());
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addIncompleteTest(Test $test, \Throwable $t, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markAborted(spl_object_id($test));
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function addSkippedTest(Test $test, \Throwable $t, float $time): void
+    {
+        if ($test instanceof BaseTestCase) {
+            UselessTests::markAborted(spl_object_id($test));
+        }
     }
 
     /**

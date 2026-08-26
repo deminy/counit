@@ -108,8 +108,12 @@ class TestCase extends BaseTestCase
             // completion), so that reset is behind us. No credit when create() joined the
             // coroutine because this test carries an exception expectation: the body has fully
             // finished, so the expectation verification's own assertions are counted natively,
-            // before PHPUnit reads the count -- crediting on top would inflate it.
-            if (!Counit::lastCreateJoined()) {
+            // before PHPUnit reads the count -- crediting on top would inflate it. The same goes
+            // for a body that ran to completion without ever yielding: its count is already
+            // final, so PHPUnit reaches the "did not perform any assertions" verdict natively,
+            // at the right moment, exactly as in blocking mode (see UselessTests for the
+            // deferred half covering yielding tests).
+            if (!Counit::lastCreateJoined() && !Counit::lastCreateFinished()) {
                 Counit::creditAssertionCount($this, 1);
             }
         } else {

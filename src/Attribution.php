@@ -102,6 +102,16 @@ class Attribution
     private static $mark = 0;
 
     /**
+     * Tests whose coroutine was observed executing code it did not hold the counter for -- i.e.
+     * it was resumed at a point counit cannot observe (hooked network IO, a fully-qualified
+     * \sleep(), a test class in the global namespace). Their own tally is an undercount, so it
+     * must never be treated as proof of anything; see UselessTests.
+     *
+     * @var array<int, true>
+     */
+    private static $unattributed = [];
+
+    /**
      * @var array<string, bool> namespaces a sleep()/usleep() shim was installed in (or found
      *                          occupied and left alone)
      */
@@ -139,6 +149,7 @@ class Attribution
             return;
         }
 
+        self::verifyHeldCounter();
         self::switchTo(null);
         unset(self::$cidOwner[self::currentCoroutineId()]);
     }
@@ -152,7 +163,17 @@ class Attribution
             return;
         }
 
+        self::verifyHeldCounter();
         self::switchTo(null);
+    }
+
+    /**
+     * Whether the test's coroutine was ever observed running unattributed code -- in which case
+     * its own per-test tally is an undercount and proves nothing.
+     */
+    public static function unattributedFor(int $key): bool
+    {
+        return isset(self::$unattributed[$key]);
     }
 
     /**
@@ -320,6 +341,21 @@ class Attribution
             self::suspended();
             Coroutine::sleep(max(0.001, $microseconds / 1000000));
             self::resumed();
+        }
+    }
+
+    /**
+     * Called at every point where the CURRENT coroutine releases the counter. If it is not the
+     * declared owner at that moment, the code it just executed ran unattributed: the coroutine
+     * was resumed without passing an observation point, so its own tally cannot be trusted.
+     */
+    private static function verifyHeldCounter(): void
+    {
+        $cid   = self::currentCoroutineId();
+        $owner = isset(self::$cidOwner[$cid]) ? self::$cidOwner[$cid] : null;
+
+        if ($owner !== null && self::$current !== $owner) {
+            self::$unattributed[$owner] = true;
         }
     }
 
