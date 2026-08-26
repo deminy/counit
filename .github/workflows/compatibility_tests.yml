@@ -66,6 +66,28 @@ jobs:
             grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
           fi
 
+      - name: Test Deferred-Failure Exit Code
+        # counit's core guarantee: a failure after the test's first yield can only surface
+        # through the deferred end-of-run block, and that block MUST force exit code 1 -- the
+        # exit code is the authoritative pass/fail signal precisely because the summary line
+        # still reads OK. The guarantee once silently broke when the warnings-only exit-code
+        # alignment was added after the deferred check (the TestResult reads all-successful for
+        # a deferred-only failure, so the alignment flipped the forced 1 back to 0); this step
+        # pins it per mode: a native failure in blocking mode, the deferred block plus exit 1
+        # under Swoole.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/LateFailureTest.php > /tmp/late-fail.log 2> /tmp/late-fail.err || rc=$?
+          cat /tmp/late-fail.log /tmp/late-fail.err
+          test "$rc" -eq 1
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'OK (1 test, 1 assertion)' /tmp/late-fail.log
+            grep -qF 'already been reported as passed' /tmp/late-fail.err
+            grep -qF 'deliberate failure after the first yield' /tmp/late-fail.err
+          else
+            grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/late-fail.log
+          fi
+
       - name: Test Depends Failure Semantics
         # A producer failing only after a yield used to be recorded as passed at that yield: its
         # failure was deferred to an end-of-run notice and its dependent ran anyway, with a NULL

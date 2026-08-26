@@ -137,7 +137,8 @@ if (extension_loaded('swoole') && !$repeatRequested) {
     // here, once we're back in normal (non-coroutine) PHP -- calling exit() from inside a
     // coroutine gets intercepted by Swoole itself and can't reliably override PHPUnit's own exit
     // code -- and force the run to fail instead of letting that false "pass" stand uncorrected.
-    if (!empty(Deminy\Counit\Counit::$deferredFailures)) {
+    $deferredFailureForcedExit = !empty(Deminy\Counit\Counit::$deferredFailures);
+    if ($deferredFailureForcedExit) {
         fwrite(STDERR, PHP_EOL . 'The following failures happened after their test had already been reported as passed' . PHP_EOL . '(the assertion/exception occurred after a sleep()/IO yield point):' . PHP_EOL . PHP_EOL);
         foreach (Deminy\Counit\Counit::$deferredFailures as $testDescription => $throwable) {
             fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
@@ -169,8 +170,11 @@ if (extension_loaded('swoole') && !$repeatRequested) {
     // --fail-on-* option exits 1. Align with the native behavior in both directions, back in
     // non-coroutine PHP, against the TestResult of the run. When no test ever created a
     // coroutine, the TestResult was not captured and neither correction applies.
+    // The alignment must never lift a deferred-failure-forced exit code: such a failure lives
+    // only in counit's deferred list, so the TestResult still reads all-successful -- exactly
+    // the shape the correction below would wrongly flip back to 0.
     $testResult = Deminy\Counit\Counit::$testResult;
-    if ($code === 1 && $testResult !== null) {
+    if ($code === 1 && $testResult !== null && !$deferredFailureForcedExit) {
         // PHPUnit 8.0 predates TestResult::wasSuccessfulIgnoringWarnings(); derive the same
         // answer from its components there. (Calling the missing method would fatal at shutdown,
         // turning every failing run's exit code 1 into 255.)
