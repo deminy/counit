@@ -151,10 +151,16 @@ class Counit
             // assertions" verdict blocking PHPUnit gives in those runs.
             $joinForTimeLimit    = TimeLimit::enforcedForRun($caller instanceof TestCase ? $caller : null);
             $joinForGlobalState  = $caller instanceof TestCase && GlobalState::isBackedUp($caller);
+            // Scoped to the manual approach on purpose: the automatic approach's own
+            // create(parent::runBare()) call runs the whole phase inside the coroutine already --
+            // correct timing, full concurrency -- and must not be joined for this.
+            $joinForPostConditions = $caller instanceof TestCase
+                && !($caller instanceof \Deminy\Counit\TestCase)
+                && PostConditions::isCustomizedFor(get_class($caller));
 
             if ($count > 0) {
                 if ($caller instanceof TestCase) {
-                    if (!$joinForTimeLimit && !$joinForGlobalState) {
+                    if (!$joinForTimeLimit && !$joinForGlobalState && !$joinForPostConditions) {
                         self::creditAssertionCount($caller, $count);
                     }
                 } else {
@@ -245,7 +251,13 @@ class Counit
             // coroutine, so the restore fires when the test method returns -- which must be
             // after the real body, not at its first yield. The matching pre-snapshot drain lives
             // in AssertionCountListener::startTest(); see GlobalState.
-            if ($joinForTimeLimit || $joinForGlobalState || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            // A manual-approach test whose class customizes PHPUnit's post-condition phase (an
+            // overridden assertPostConditions(), or a method carrying the postCondition
+            // annotation) joins too: runBare() invokes those hooks right after the test method
+            // returns, and a throwing hook must fail/error the test natively -- which it only
+            // can when the body has truly finished. Again no credit is applied. See
+            // PostConditions.
+            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();

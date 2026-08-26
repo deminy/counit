@@ -447,6 +447,27 @@ faster, with limitations apply. Here is a list of limitations of this package:
     bystanders.
   * A process-isolated test needs none of this and never did: isolation skips the snapshot machinery entirely (the
     child process's mutations die with it).
+* Method _assertPostConditions()_ and `@postCondition`-annotated hook methods (the annotation exists as of _PHPUnit_
+  9.1) work with exact _PHPUnit_ semantics.
+  _PHPUnit_ 8/9 run the post-condition phase from _runBare()_, immediately after the test method invocation returns.
+  In the automatic approach this was always correct — the whole _runBare()_ runs inside the test's coroutine, so the
+  phase follows the truly finished body, with full concurrency kept. In the manual approach — whose _runBare()_ is
+  _PHPUnit_'s own, running on the main coroutine — the phase used to fire at the body's first yield: the hooks
+  inspected the test while its body was still in flight (failing loudly, or passing vacuously against pre-body
+  state), and they ran even for a body that failed only after a yield, where blocking _PHPUnit_ skips the phase
+  entirely. So _Counit::create()_ now detects — by reflection, per class — a caller whose class customizes the phase
+  (an overridden _assertPostConditions()_, in a parent class too, or any `@postCondition` method) and *joins* its
+  coroutine, the `@depends`-producer mechanism: the phase follows the real body, is skipped when the body failed,
+  and a throwing hook fails/errors the test natively. Notes:
+  * Only the customizing class's manual-approach tests lose their own concurrency; every other test still overlaps
+    with them, including while they wait. A class customizing nothing — the overwhelming majority — is completely
+    unaffected, and automatic-approach tests are never joined for this (they need no fix).
+  * As on every join path, no assertion credit is applied: a customizing test performing no assertions is flagged
+    risky, exactly as under blocking _PHPUnit_.
+  * _assertPreConditions()_ / `@preCondition` methods need no handling in either approach: _PHPUnit_ invokes them
+    right before the test method, inside the same coroutine (automatic) or before the body's first yield (manual).
+  * The detection is caller-based like the _expectException()_ one: a _Counit::create()_ call made from a helper
+    object rather than the test method itself is not joined.
 * Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
   with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
 

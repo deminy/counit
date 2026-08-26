@@ -284,6 +284,61 @@ jobs:
           # snapshot was taken after the real body, not at the first yield.
           grep -qF "'counit_bg_post' => 'post-yield'" /tmp/backup-strict.log
 
+      - name: Test Post-Condition Hooks
+        # PHPUnit runs the post-condition phase (assertPostConditions() and postCondition-annotated
+        # methods) from runBare(), right after the test method invocation returns. The automatic
+        # approach was never broken here -- the whole runBare() runs inside the test's coroutine,
+        # so the phase always follows the finished body (PostConditionsTest pins that, and that the
+        # manual-approach join's detection never leaks into the automatic wrapper's own
+        # Counit::create() call). The manual approach had the 1.x mistiming: its runBare() is
+        # PHPUnit's own, on the main coroutine, so a customized hook used to inspect the test at
+        # the body's first yield -- and it ran even when the body failed only after a yield, where
+        # blocking PHPUnit skips the phase. Counit::create() now detects a customizing class by
+        # reflection and joins, so the phase runs after the finished body and a throwing hook
+        # fails/errors the test natively. Since joined tests get no assertion credit, a customizing
+        # test performing no assertions is risky again, exactly as under blocking PHPUnit (the
+        # Risky target); the Skip target pins the skip-on-failure half: the post-yield body failure
+        # is native (not deferred) and the hook must not have run. The expected output is identical
+        # with and without Swoole.
+        run: |
+          # The postCondition/preCondition annotations (and the hook list backing them) exist
+          # only as of PHPUnit 9.1 -- earlier versions invoke assertPostConditions() directly --
+          # so the annotation target is exercised only where upstream honors it (blocking PHPUnit
+          # fails that test identically on older versions, since its annotated hooks never run).
+          targets="PostConditionsTest PostConditionsManualTest PostConditionsRiskyTest PostConditionsSkipTest"
+          if php -r 'require "vendor/autoload.php"; exit(array_key_exists("postCondition", PHPUnit\Util\Test::getHookMethods(PHPUnit\Framework\TestCase::class)) ? 0 : 1);'; then
+            targets="$targets PostConditionAnnotationTest"
+          fi
+          for target in $targets; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/postcond.log 2> /tmp/postcond.err || rc=$?
+            cat /tmp/postcond.log /tmp/postcond.err
+            # Nothing may surface in a deferred end-of-run block.
+            ! grep -qF 'already been reported as passed' /tmp/postcond.err
+            case "$target" in
+              PostConditionsTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (2 tests, 4 assertions)' /tmp/postcond.log ;;
+              PostConditionsManualTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (2 tests, 4 assertions)' /tmp/postcond.log ;;
+              PostConditionAnnotationTest)
+                test "$rc" -eq 0
+                grep -qF 'OK (1 test, 2 assertions)' /tmp/postcond.log ;;
+              PostConditionsRiskyTest)
+                test "$rc" -eq 0
+                grep -qF 'Tests: 1, Assertions: 0, Risky: 1.' /tmp/postcond.log
+                grep -qF 'This test did not perform any assertions' /tmp/postcond.log ;;
+              PostConditionsSkipTest)
+                test "$rc" -eq 1
+                grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/postcond.log
+                # The test fails natively with the BODY's message; the post-condition hook
+                # must never have run for the failed body.
+                grep -qF 'late failure' /tmp/postcond.log
+                ! grep -qF 'post-conditions must not run' /tmp/postcond.log ;;
+            esac
+          done
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are read from each test object as
         # PHPUnit reports it, so under Swoole they used to carry the up-front assertion credit (one
