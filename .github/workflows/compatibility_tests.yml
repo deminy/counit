@@ -46,24 +46,36 @@ jobs:
           grep -qF 'OK (48 tests, 58 assertions)' /tmp/compatibility.log
 
       - name: Test Late Skip/Incomplete Handling
-        # A skip/incomplete signalled after the test's first yield cannot change the test's status
-        # anymore (PHPUnit already reported the test as passed); counit must list such tests in an
-        # end-of-run notice WITHOUT failing the run, while a skip requested before the first yield
-        # keeps full PHPUnit semantics. The two modes deliberately diverge here, so each is
-        # asserted against its own expected output; the exit code must be 0 in both. This cannot
-        # live in the exact-summary-gated suite above, since a skipped test changes that summary
-        # line by design.
+        # A skip/incomplete signalled after the test's first yield cannot be made native (the
+        # Throwable only exists after PHPUnit reported the test as passed), but it is now
+        # replayed into the run's TestResult through the public addError() once every coroutine
+        # has drained (see CounitExtension): the summary counts and -- where PHPUnit supports
+        # the flags, i.e. PHPUnit 9 -- the --fail-on-skipped/--fail-on-incomplete exit codes
+        # match blocking mode exactly, so the expected output is identical with and without
+        # Swoole and the old STDERR notice must be absent. The data-set target pins the identity
+        # handling (deferred verdicts are stashed with the TestCase object at deferral time).
+        # These cannot live in the exact-summary-gated suite above, since skipped tests change
+        # that summary line by design.
         run: |
-          set -o pipefail
-          ./counit -c phpunit.xml.dist tests/regression/LateSkipTest.php > /tmp/late-skip.log 2> /tmp/late-skip.err
-          cat /tmp/late-skip.log /tmp/late-skip.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/late-skip.log
-            grep -qF 'status remains "passed":' /tmp/late-skip.err
-            grep -qF 'LateSkipTest::testSkippedAfterYield' /tmp/late-skip.err
-            grep -qF 'LateSkipTest::testIncompleteAfterYield' /tmp/late-skip.err
-          else
-            grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
+          for target in LateSkipTest LateSkipDataSetTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/late-skip.log 2> /tmp/late-skip.err || rc=$?
+            cat /tmp/late-skip.log /tmp/late-skip.err
+            test "$rc" -eq 0
+            # The verdicts are recorded now: neither the fallback notice nor a deferred failure
+            # may appear.
+            ! grep -qF 'status remains "passed"' /tmp/late-skip.err
+            ! grep -qF 'already been reported as passed' /tmp/late-skip.err
+            case "$target" in
+              LateSkipTest)        grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log ;;
+              LateSkipDataSetTest) grep -qF 'Tests: 2, Assertions: 1, Skipped: 1.' /tmp/late-skip.log ;;
+            esac
+          done
+          # The --fail-on-* exit codes are exact in both modes where PHPUnit knows the flags
+          # (PHPUnit 9; PHPUnit 8 supports only the risky and warning members of the family).
+          if ./vendor/bin/phpunit --help 2>/dev/null | grep -q -- '--fail-on-skipped'; then
+            rc=0; ./counit -c phpunit.xml.dist --fail-on-skipped    tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+            rc=0; ./counit -c phpunit.xml.dist --fail-on-incomplete tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
           fi
 
       - name: Test Deferred-Failure Exit Code
@@ -136,7 +148,7 @@ jobs:
         # swallowed -- identical output with and without Swoole. (2) A skip signalled from
         # tearDown() after a passing body is a GENUINE skip on PHPUnit 8/9 (upstream semantics,
         # unlike PHPUnit 10+ where it fails the test): the run must exit 0 in BOTH modes -- the
-        # pre-yield skip honored natively, the post-yield one via the benign end-of-run notice.
+        # pre-yield skip honored natively, the post-yield one through the late-skip replay.
         # This deliberately guards against ever porting the 1.x branch's exit-1 treatment (its
         # f5cbf24) to this branch. (3) A joined producer's tearDown() throw errors the producer
         # natively and skips its dependent -- identical in both modes, no deferred block.
@@ -158,13 +170,10 @@ jobs:
           cat /tmp/teardown-skip.log /tmp/teardown-skip.err
           test "$rc" -eq 0
           ! grep -qF 'already been reported as passed' /tmp/teardown-skip.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/teardown-skip.log
-            grep -qF 'status remains "passed":' /tmp/teardown-skip.err
-            grep -qF 'TearDownSkipTest::testPostYieldSkipFromTearDown' /tmp/teardown-skip.err
-          else
-            grep -qF 'Tests: 2, Assertions: 2, Skipped: 2.' /tmp/teardown-skip.log
-          fi
+          # Identical in both modes since the late-skip replay: the post-yield tearDown() skip
+          # is recorded into the TestResult after the drain instead of surfacing as a notice.
+          grep -qF 'Tests: 2, Assertions: 2, Skipped: 2.' /tmp/teardown-skip.log
+          ! grep -qF 'status remains "passed"' /tmp/teardown-skip.err
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/DependsTearDownTest.php > /tmp/depends-td.log 2> /tmp/depends-td.err || rc=$?
           cat /tmp/depends-td.log /tmp/depends-td.err
@@ -512,10 +521,12 @@ jobs:
             grep -qF "$quiet" /tmp/useless.log
           done
           # Exemptions: a declared-none test (annotation or in-body call) and a post-yield abort
-          # are never reported, in either mode.
+          # are never reported, in either mode -- and since the late-skip replay, the post-yield
+          # skip appears in the summary identically in both modes while STILL not being flagged.
           ./counit -c phpunit.xml.dist tests/regression/UselessTestExemptTest.php > /tmp/useless.log 2>&1
           cat /tmp/useless.log
           ! grep -qF 'did not perform any assertions' /tmp/useless.log
+          grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/useless.log
           # Documented residual: an unobservable yield stays silent under Swoole (never a false
           # accusation), and is flagged natively without it.
           rc=0

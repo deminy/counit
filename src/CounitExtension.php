@@ -88,6 +88,38 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
             // report, and hold whatever the test's counting window happened to catch. The logger
             // buffers the report and only writes it from flush(), which TestResult::flushListeners()
             // triggers after this hook has run.
+            // Replay the skip/incomplete verdicts PHPUnit could not reach on its own: a
+            // markTestSkipped()/markTestIncomplete() call made after the test's first yield is
+            // thrown mid-body -- nothing is registered up front for a join decision to detect --
+            // and lands in Counit::$deferredSkips after PHPUnit already reported the test as
+            // passed. Handing each stashed Throwable to the public TestResult::addError() here,
+            // after the drain and before the printer reads the result, classifies it natively
+            // (PHPUnit 8/9 route SkippedTest/IncompleteTest to their skipped/incomplete records
+            // in addError()): the Skipped:/Incomplete: summary counts, the listings and -- via
+            // the script's exit-code alignment -- the --fail-on-skipped/--fail-on-incomplete
+            // exit codes (PHPUnit 9) match a blocking run exactly, with no test-count
+            // compensation needed. A successfully replayed entry leaves $deferredSkips, so the
+            // script's notice only reports what could not be recorded; the recorded per-test
+            // status stays "passed" (the run already moved past it), and the printer appends a
+            // late S/I progress character -- both documented. Runs before the useless-test pass
+            // below so the listener verdicts re-mark the replayed tests as aborted.
+            if (Counit::$testResult instanceof TestResult) {
+                foreach (Counit::$deferredSkips as $description => $throwable) {
+                    $test = Counit::$deferredSkipTests[$description] ?? null;
+                    if ($test === null) {
+                        continue;
+                    }
+
+                    try {
+                        Counit::$testResult->addError($test, $throwable, 0.0);
+                        unset(Counit::$deferredSkips[$description]);
+                    } catch (\Throwable $t) {
+                        // Left in $deferredSkips: the script's notice reports it instead.
+                    }
+                }
+            }
+            Counit::$deferredSkipTests = [];
+
             // Emit the "did not perform any assertions" verdicts (and their mirror) PHPUnit
             // could not reach on its own, now that every coroutine has drained and the per-test
             // tallies are final. This hook runs before the result printer writes its footer, so

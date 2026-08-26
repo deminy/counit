@@ -69,6 +69,21 @@ class Counit
     public static $deferredSkips = [];
 
     /**
+     * The TestCase object behind each $deferredSkips entry (same key). CounitExtension replays
+     * each deferred skip/incomplete into the run's TestResult through its public addError() --
+     * which classifies SkippedTest/IncompleteTest Throwables natively -- once every coroutine
+     * has drained, so the Skipped:/Incomplete: summary counts, the listings and the
+     * --fail-on-skipped/--fail-on-incomplete exit codes (PHPUnit 9; the flags do not exist on
+     * PHPUnit 8) match a blocking run exactly. Successfully replayed entries are removed from
+     * $deferredSkips, leaving the script's notice as the fail-soft fallback. The object is
+     * stashed at deferral time rather than looked up later: the closure is the only place that
+     * still holds the caller when the verdict arrives.
+     *
+     * @var array<string, TestCase>
+     */
+    public static $deferredSkipTests = [];
+
+    /**
      * Per test key (spl_object_id() of its TestCase object): the up-front assertion credit
      * applied to it. The run total only needs the sum ($creditedAssertionCount); the JUnit
      * per-testcase correction needs to know which test carries which credit.
@@ -210,7 +225,7 @@ class Counit
                 Attribution::claimMain($key);
             }
 
-            $id = Coroutine::create(function () use ($callable, $key, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
+            $id = Coroutine::create(function () use ($callable, $caller, $key, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($key);
                 $obHandle = $captureOutput ? OutputCapture::start() : null;
 
@@ -228,6 +243,9 @@ class Counit
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
                             self::$deferredSkips[$description] = $e;
+                            if ($caller instanceof TestCase) {
+                                self::$deferredSkipTests[$description] = $caller;
+                            }
                             self::markAbortedAfterReport($key);
                         } else {
                             self::$deferredFailures[$description] = $e;

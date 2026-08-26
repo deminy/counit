@@ -409,11 +409,23 @@ faster, with limitations apply. Here is a list of limitations of this package:
     _Counit::create()_ first yields on a sleep/IO call — possibly while that callback is still running. Put
     order-sensitive cleanup inside a `try { ... } finally { ... }` block within the callback instead of in
     _tearDown()_.
-* A _markTestSkipped()_ or _markTestIncomplete()_ call made after the test's first sleep/IO yield cannot change the
-  test's status anymore: _PHPUnit_ already reported the test as passed at that yield. _counit_ lists such tests in a
-  notice at the end of the run — their status remains "passed" — without failing the run, matching the exit code of a
-  blocking run (where skipped/incomplete tests do not fail the run either). To have the skip honored, call it before
-  the first yield.
+* A _markTestSkipped()_ or _markTestIncomplete()_ call made after the test's first sleep/IO yield works with exact
+  _PHPUnit_ semantics for the run-level surfaces, in both approaches (both share the divergence: the skip Throwable
+  propagates out of `runBare()` into _counit_'s already-returned branch regardless of which side of `runBare()` the
+  coroutine wraps). The verdict cannot be made native — the Throwable is thrown mid-body, so unlike an exception or
+  output expectation there is nothing registered at the first yield for a join decision to detect, and _PHPUnit_
+  has already reported the test as passed. _counit_ therefore replays each such verdict into the run's
+  `TestResult` through the public `addError()` — which classifies `SkippedTest`/`IncompleteTest` Throwables
+  natively — once every coroutine has drained: the `Skipped:`/`Incomplete:` summary counts, the listings and the
+  `--fail-on-skipped`/`--fail-on-incomplete` exit codes (_PHPUnit_ 9; the flags do not exist on _PHPUnit_ 8) match
+  a blocking run exactly. Notes:
+  * The test's recorded status stays "passed" (the run already moved past it): the JUnit XML report and the result
+    cache still record a pass, and `--stop-on-*` cannot react to a verdict learned once the run has finished. A
+    skip issued before the first yield remains fully native.
+  * _PHPUnit_'s printer writes a progress symbol per late record, so stray `S`/`I` characters trail the progress
+    line — the same cosmetic as the deferred risky verdicts' stray `R`.
+  * Should a replay ever fail, the affected tests are listed in a STDERR notice instead — degraded, never a wrong
+    count.
 * Option `--enforce-time-limit` (with `--default-time-limit` and the `@small`/`@medium`/`@large` size annotations)
   works with exact _PHPUnit_ semantics — at the price of the run's concurrency. _PHPUnit_ 8/9 time a limited test by
   wrapping the whole _runBare()_ call in a `pcntl_alarm()`/`SIGALRM` guard (package _phpunit/php-invoker_) and disarm

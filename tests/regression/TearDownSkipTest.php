@@ -11,8 +11,9 @@ use Deminy\Counit\TestCase;
  * PHPUnit 8/9 honors it as a GENUINE skip -- the run exits 0 -- unlike PHPUnit 10+, where such
  * a skip fails the test (which is why the 1.x branch routes it into the deferred FAILURE block
  * with exit code 1). This branch must never adopt that treatment: a hook skip stays benign
- * here. Run by the compatibility workflow, which asserts exit code 0 in BOTH modes -- the
- * pre-yield skip is honored natively, the post-yield one via the harmless end-of-run notice.
+ * here. Run by the compatibility workflow, which asserts exit code 0 and the exact
+ * blocking-mode summary in BOTH modes -- the pre-yield skip is honored natively, the post-yield
+ * one through the late-skip replay into the TestResult (Skipped: 2, no notice).
  *
  * @internal
  * @coversNothing
