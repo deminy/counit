@@ -53,7 +53,16 @@ final class CounitExtension implements Extension
     #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
+        // This is the same Configuration instance TestRunner reads its time-limit settings from,
+        // handed over through the sanctioned extension seam -- no reflection into PHPUnit's
+        // @internal configuration Registry needed.
+        TimeLimit::initialize($configuration);
+
         if (Helper::isCoroutineFriendly()) {
+            if (TimeLimit::enforcedForRun()) {
+                TimeLimit::announceSerializedRun();
+            }
+
             // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine
             // only ever switches at a yield. Swoole's preemptive scheduler breaks that premise,
             // so attribution stays off under it and the JUnit per-testcase correction falls back

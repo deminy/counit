@@ -164,6 +164,52 @@ jobs:
           # ... and nothing may surface as a deferred end-of-run failure.
           ! grep -qF 'already been reported as passed' /tmp/exception-fail.err
 
+      - name: Test Time Limit Enforcement
+        # --enforce-time-limit used to measure only up to a test's first yield under Swoole (an
+        # over-limit test simply passed), and the SIGALRM php-invoker arms could outlive a joined
+        # test's runBare() and abort an unrelated test's coroutine. counit now joins every test at
+        # its first yield while the option is active, so PHPUnit times the real runBare() and
+        # reports the timeout natively -- risky verdict, exact message, --fail-on-risky honored --
+        # at the cost of the run being serialized for its duration. The expected output is
+        # identical with and without Swoole; pcntl is required in both modes (PHPUnit itself
+        # silently skips enforcement without it), hence the guard so a runner losing pcntl fails
+        # loudly instead of the whole step silently passing for the wrong reason.
+        run: |
+          php -r 'exit(extension_loaded("pcntl") ? 0 : 1);'
+          for target in TimeLimitAutomaticTest TimeLimitManualTest TimeLimitLargeTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist --enforce-time-limit --default-time-limit=1 "tests/regression/${target}.php" > /tmp/time-limit.log 2> /tmp/time-limit.err || rc=$?
+            cat /tmp/time-limit.log /tmp/time-limit.err
+            test "$rc" -eq 0
+            # Nothing may surface as a deferred end-of-run failure: the timeout must land inside
+            # PHPUnit's native handling, not in counit's after-the-summary block.
+            ! grep -qF 'already been reported as passed' /tmp/time-limit.err
+            case "$target" in
+              TimeLimitAutomaticTest)
+                grep -qF 'Tests: 2, Assertions: 1, Risky: 1.' /tmp/time-limit.log
+                grep -qF 'This test was aborted after 1 second' /tmp/time-limit.log
+                ;;
+              TimeLimitManualTest)
+                grep -qF 'Tests: 2, Assertions: 1, Risky: 1.' /tmp/time-limit.log
+                grep -qF 'This test was aborted after 1 second' /tmp/time-limit.log
+                ;;
+              TimeLimitLargeTest)
+                # A #[Large] class sleeps past the 1-second default limit but under the 60-second
+                # large-test limit: the per-size timeout selection is PHPUnit's own in both modes.
+                grep -qF 'OK (1 test, 1 assertion)' /tmp/time-limit.log
+                ;;
+            esac
+          done
+          # The serialized-run notice is printed under Swoole only, and --fail-on-risky must flip
+          # the exit code natively in both modes.
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'the run is serialized' /tmp/time-limit.err
+          fi
+          rc=0
+          ./counit -c phpunit.xml.dist --enforce-time-limit --default-time-limit=1 --fail-on-risky tests/regression/TimeLimitAutomaticTest.php > /tmp/time-limit-risky.log 2>&1 || rc=$?
+          cat /tmp/time-limit-risky.log
+          test "$rc" -eq 1
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

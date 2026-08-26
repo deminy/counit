@@ -343,6 +343,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `#[Requires*]` preconditions | ✅ | ✅ (`@requires`) |
 | `--order-by` (start order); `#[TestDox]` naming | ✅ | ✅ |
 | `--fail-on-risky` / `--fail-on-incomplete` / `--fail-on-skipped` | ✅ | ✅ |
+| `--enforce-time-limit` (with `--default-time-limit`, `#[Small]`/`#[Medium]`/`#[Large]`) | ✅ exact — every test is joined at its first yield while the option is active, so PHPUnit times the real `runBare()` and reports a timeout natively (risky verdict, `--fail-on-risky` honored), in both approaches. The run is serialized for the duration: with the option, counit gives PHPUnit's timings and PHPUnit's speed (a STDERR notice announces this). Needs `ext-pcntl`, as under plain _PHPUnit_; marginally more lenient at the exact boundary (see notes) | ❌ measures only up to the first yield; a limit expiring while a joined test waits can even abort an unrelated test (fix not yet ported) |
 | Exit code as the pass/fail signal | ✅ authoritative (failures after a yield force a non-zero exit) | ✅ |
 
 ## Incompatible features
@@ -359,7 +360,6 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | A `tearDown()` / `#[After]` hook that throws or skips | ⚠️ reported in the end-of-run failure block with a non-zero exit code, not as that test's own error; a skip signalled from such a hook — a test **failure** under blocking _PHPUnit_, never a skip — is reported the same way. Fully native semantics apply on a joined `#[Depends]` producer and on a test whose `setUp()` threw or skipped (their hooks run natively) | ⚠️ a hook throw after a yield lands in the deferred block (before one, it errors the test natively); a hook **skip** is a genuine skip on _PHPUnit_ 8/9 — upstream semantics, exit code 0 — and 0.x honors it: natively before a yield, via the benign end-of-run notice after one. Joined producers' hooks are fully native there too |
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
 | Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
-| `--enforce-time-limit` | ❌ only measures up to the first yield | ❌ |
 | Code coverage | ⚠️ per-test attribution wrong by construction; aggregate coverage unverified | ⚠️ same |
 | `--repeat` | (option removed in _PHPUnit_ 10+) | ⚠️ runs in blocking mode — correct, but without speedup |
 
@@ -431,6 +431,34 @@ faster, with limitations apply. Here is a list of limitations of this package:
   * The detection reads _PHPUnit_'s internal expectation state (kept in two different shapes across PHPUnit 12.5
     and 13); should a future _PHPUnit_ release change it, _counit_ prints a notice once and degrades to the
     previous behavior — loud, never silent.
+* Option `--enforce-time-limit` works with exact _PHPUnit_ semantics — at the price of the run's concurrency.
+  _PHPUnit_ times a limited test by wrapping the whole _runBare()_ call in a `pcntl_alarm()`/`SIGALRM` guard
+  (package _phpunit/php-invoker_) and disarms the alarm the moment _runBare()_ returns. Under _counit_ that used to
+  be the body's first yield: the measured window covered milliseconds, so an over-limit test simply passed — and on
+  the joined paths (a _#[Depends]_ producer, an _expectException()_ test), where _runBare()_ does stay alive for the
+  test's real duration, the still-armed alarm's signal was delivered to whichever coroutine resumed first, aborting
+  an unrelated test and failing a green run non-deterministically. So while the option is active, _counit_ joins
+  **every** test's coroutine at its first yield (the same mechanism as for a _#[Depends]_ producer): _PHPUnit_'s own
+  timer measures the real duration and reports a timeout natively — risky verdict, exact message, `--fail-on-risky`
+  honored — and, with no concurrent test coroutines left, the alarm can only ever fire within the timed test's own
+  window. Notes:
+  * The whole run is serialized while the option is active: with it, _counit_ gives _PHPUnit_'s timings and
+    _PHPUnit_'s speed — the option and _counit_'s concurrency are mutually exclusive by construction (per-test wall
+    time is not a meaningful quantity while tests deliberately overlap). A notice on STDERR announces this; silence
+    it with _COUNIT_SILENCE_TEARDOWN_NOTICE=1_.
+  * Enforcement needs the `pcntl` extension in both modes — plain _PHPUnit_ silently skips enforcement without it
+    (the mechanism is POSIX-only) — and _counit_ then skips the joining too, keeping full concurrency. The Docker
+    images used for local development install `pcntl` so the time-limit regression tests can run there.
+  * At the exact boundary — a `sleep(N)` under an N-second limit — _counit_ is marginally more lenient than
+    blocking _PHPUnit_: a hooked sleep is not interrupted by `SIGALRM` the way blocking `sleep()` is (the timeout
+    is only thrown once the sleep completes and the coroutine resumes), so a test at exactly its limit can pass
+    under _counit_ where blocking mode — itself flaky at the boundary — sometimes aborts it. Choose limits with
+    margin.
+  * A test body that never yields was timed exactly even before this fix, and still is: the alarm dispatches on the
+    running code just as under plain _PHPUnit_.
+  * On the 0.2.x line the option remains unsupported: the root cause is identical (_PHPUnit_ 8/9's
+    _TestResult::run()_ wraps _runBare()_ in the same `pcntl_alarm()` guard, and 0.2.x's _runBare()_ override
+    returns at the body's first yield), and the join-based fix has not been ported.
 * Attribute _#[DoesNotPerformAssertions]_ (at method or class level) and method _expectNotToPerformAssertions()_ (when
   called in _setUp()_ or at the top of the test body) are supported in both approaches: such tests report clean with
   zero assertions, same as under _PHPUnit_. Two limitations remain, both consequences of the risky verdict being

@@ -109,11 +109,13 @@ class Counit
      *                   an exception expectation (see below), since PHPUnit then reads the real, final count.
      * @param callable|null $onJoin counit-internal: invoked -- on the calling coroutine, before the wrapped callable
      *                              can resume -- when the coroutine is about to be joined because the calling test
-     *                              carries an exception expectation. TestCase::invokeTestMethod() uses it to hand
-     *                              the after-test hooks back to PHPUnit for that test.
+     *                              carries an exception expectation (or the run enforces time limits; see
+     *                              TimeLimit). TestCase::invokeTestMethod() uses it to hand the after-test hooks
+     *                              back to PHPUnit for that test.
      * @return int return 0 if not running inside a coroutine, or when the coroutine was joined (run to completion
-     *             before returning) because the calling test carries an exception expectation; otherwise, return
-     *             the coroutine ID, or -1 when failed creating a new coroutine to run the tests
+     *             before returning) because the calling test carries an exception expectation or the run enforces
+     *             time limits; otherwise, return the coroutine ID, or -1 when failed creating a new coroutine to
+     *             run the tests
      */
     public static function create(callable $callable, int $count = 0, ?callable $onJoin = null): int
     {
@@ -211,7 +213,15 @@ class Counit
             // is called inside the body, so the expectation only exists once the body has run to
             // its first yield. No assertion credit is applied on this path -- the expectation
             // verification counts its own assertions natively, before PHPUnit reads the count.
-            if ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller)) {
+            // A run with --enforce-time-limit active joins EVERY create() call -- test bodies and
+            // nested calls alike: PHPUnit times a limited test by wrapping runBare() in a
+            // pcntl_alarm() guard, so the body must have truly finished before runBare() returns,
+            // and no other coroutine may be in flight while a test's alarm is armed (the SIGALRM
+            // is delivered to whichever coroutine resumes first). The run is serialized for the
+            // duration; failures land synchronously in PHPUnit's native handling, exactly as in
+            // blocking mode, and no assertion credit is needed -- PHPUnit reads the real, final
+            // count. See TimeLimit.
+            if (TimeLimit::enforcedForRun() || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 if ($onJoin !== null) {
                     $onJoin();
                 }
@@ -391,6 +401,8 @@ class Counit
      * where PHPUnit expects them, at the cost of that one test's own concurrency (its dependents
      * could not have overlapped with it anyway). No assertion credit is involved: the body has
      * fully run by the time PHPUnit reads the test's count, exactly as in blocking mode.
+     * TestCase::invokeTestMethod() routes every automatic-approach test through this join while
+     * --enforce-time-limit is active, for the same body-must-truly-finish reason; see TimeLimit.
      *
      * @throws \Throwable whatever the callable threw
      */

@@ -187,7 +187,12 @@ class TestCase extends BaseTestCase
             // and a producer that only fails after a yield skips them exactly as in blocking mode.
             // It costs that one test its own concurrency; every other test still overlaps with it,
             // including while it waits.
-            if (DependencyMap::isProducer(static::class, $this->name())) {
+            // A run with --enforce-time-limit active takes the same join, for EVERY test: PHPUnit
+            // times a limited test by wrapping runBare() in a pcntl_alarm() guard, so the body
+            // must have truly finished before this method returns for the measured window -- and
+            // the alarm's SIGALRM, which is delivered to whichever coroutine resumes first -- to
+            // be correct. The run is serialized for the duration; see TimeLimit.
+            if (DependencyMap::isProducer(static::class, $this->name()) || TimeLimit::enforcedForRun()) {
                 // The body will have fully run before this method returns, so PHPUnit's own
                 // after-test hook timing is correct again for this one test: hand the hooks back
                 // to the native invocation, which also restores its exact error semantics -- a
