@@ -121,7 +121,8 @@ class Counit
      * @param callable|null $onJoin counit-internal: invoked -- on the calling coroutine, before the wrapped callable
      *                              can resume -- when the coroutine is about to be joined for any of the reasons
      *                              listed at the join condition below (an exception or output expectation, a
-     *                              global-state backup, a customized post-condition phase, or a run-level switch).
+     *                              verifiable mock, a global-state backup, a customized post-condition phase, or a
+     *                              run-level switch).
      *                              TestCase::invokeTestMethod() uses it to hand the after-test hooks back to
      *                              PHPUnit for that test.
      * @return int return 0 if not running inside a coroutine, or when the coroutine was joined (run to completion
@@ -292,13 +293,28 @@ class Counit
             // create() call joins: the unexpected-output risky check reads the test's output
             // right after runBare(), so only a joined-and-replayed body can satisfy it. The run
             // serializes for the duration; see OutputExpectations.
+            // A test that has registered a mock carrying an invocation-count rule
+            // (->expects(...)) joins for the same body-must-truly-finish reason: runBare()
+            // verifies every registered mock right after runTest() returns, and that
+            // verification is not read-only -- a mock whose expectation is already satisfied at
+            // the first yield passes verification and is then STRIPPED (its invocation mocker is
+            // unset), so a post-yield never()/exceeded-count violation was silently allowed,
+            // while a not-yet-satisfied expectation failed prematurely ("was never invoked").
+            // Joining lets PHPUnit verify the truly finished body and classify natively in both
+            // directions; a violation mid-body throws at call time into the joined body, exactly
+            // as in blocking mode. Mocks without a count rule (stubs, parameter-rule-only mocks)
+            // are skipped -- and not stripped -- by PHPUnit's verification itself, so they do
+            // not join. Mocks are registered inside setUp()/the body, so this too is only
+            // checkable here; as on the other join paths no assertion credit is applied -- the
+            // verification counts its one assertion per mock natively. See MockExpectations.
             if (TimeLimit::enforcedForRun()
                 || OutputExpectations::disallowedForRun()
                 || ($caller instanceof TestCase
                     && (ExceptionExpectations::isRegisteredFor($caller)
                         || $caller->expectsOutput()
                         || GlobalState::isBackedUp($caller::class, $caller->name())
-                        || PostConditions::isCustomizedFor($caller::class)))) {
+                        || PostConditions::isCustomizedFor($caller::class)
+                        || MockExpectations::isVerifiableFor($caller)))) {
                 if ($onJoin !== null) {
                     $onJoin();
                 }

@@ -8,9 +8,11 @@ use Deminy\Counit\Counit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The manual approach's counterpart: PHPUnit verifies the mock on the main coroutine as soon as the
- * wrapped callable first yields, so the mock has to be satisfied before that yield. Its
- * verification is then counted within the test's own window and must not be corrected again.
+ * The manual approach's counterpart: the mock registered before the Counit::create() call makes
+ * the test join at the callable's first yield (see MockExpectations), so PHPUnit verifies the
+ * truly finished body. The requested assertion credit is not applied on the join path -- the
+ * body's assertion and the verification are both counted natively and must not be corrected
+ * again.
  *
  * @internal
  * @coversNothing

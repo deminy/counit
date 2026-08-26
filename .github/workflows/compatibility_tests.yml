@@ -458,6 +458,64 @@ jobs:
           test "$rc" -eq 0
           grep -qF 'Tests: 2, Assertions: 2, Deprecations: 1, Risky: 1.' /tmp/handler.log
 
+      - name: Test Mock Expectation Verification
+        # PHPUnit verifies every registered mock from runBare(), right after runTest() returns --
+        # under Swoole that used to be the body's first yield: an expectation satisfied only
+        # after a sleep/IO yield failed prematurely ("was never invoked"), and -- because a
+        # passing verification also strips the mock's invocation mocker -- a never()/exceeded-
+        # count violation after the yield passed SILENTLY with exit code 0. counit now joins a
+        # test that has a registered mock carrying an invocation-count rule at its first yield
+        # (see MockExpectations), so PHPUnit verifies the truly finished body and classifies
+        # natively in both directions. Stubs and mocks without a count rule are never verified
+        # by PHPUnit and are not joined. The expected output is identical with and without
+        # Swoole, except the final, documented residual: a mock created only after the first
+        # yield is invisible at the join decision and stays unverified.
+        run: |
+          for target in MockExpectationTest MockSetUpTest MockExpectationManualTest MockStubTest MockPostConditionInterplayTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/mock.log 2> /tmp/mock.err || rc=$?
+            cat /tmp/mock.log /tmp/mock.err
+            test "$rc" -eq 0
+            # Nothing may surface as a deferred end-of-run failure: every covered verdict is
+            # native.
+            ! grep -qF 'already been reported as passed' /tmp/mock.err
+            case "$target" in
+              MockExpectationTest)            grep -qF 'OK (3 tests, 3 assertions)' /tmp/mock.log ;;
+              MockSetUpTest)                  grep -qF 'OK (1 test, 1 assertion)' /tmp/mock.log ;;
+              MockExpectationManualTest)      grep -qF 'OK (1 test, 1 assertion)' /tmp/mock.log ;;
+              MockStubTest)                   grep -qF 'OK (2 tests, 2 assertions)' /tmp/mock.log ;;
+              MockPostConditionInterplayTest) grep -qF 'OK (1 test, 2 assertions)' /tmp/mock.log ;;
+            esac
+          done
+          # Genuine violations stay native failures -- in both directions: an expectation never
+          # satisfied, and a never() expectation violated only after a yield (the shape that
+          # passed silently before the fix).
+          for target in MockFailureTest MockNeverViolatedTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/mock-fail.log 2> /tmp/mock-fail.err || rc=$?
+            cat /tmp/mock-fail.log /tmp/mock-fail.err
+            test "$rc" -eq 1
+            grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/mock-fail.log
+            ! grep -qF 'already been reported as passed' /tmp/mock-fail.err
+            case "$target" in
+              MockFailureTest)      grep -qF 'was expected to be invoked once but was never invoked' /tmp/mock-fail.log ;;
+              MockNeverViolatedTest) grep -qF 'was not expected to be called, actually called 1 time' /tmp/mock-fail.log ;;
+            esac
+          done
+          # Documented residual: a mock created only after the first yield is never verified
+          # under Swoole (blocking mode fails the test).
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/MockLateCreationTest.php > /tmp/mock-late.log 2>&1 || rc=$?
+          cat /tmp/mock-late.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 0
+            grep -qF 'OK (1 test, 1 assertion)' /tmp/mock-late.log
+          else
+            test "$rc" -eq 1
+            grep -qF 'Tests: 1, Assertions: 2, Failures: 1.' /tmp/mock-late.log
+            grep -qF 'was expected to be invoked once but was never invoked' /tmp/mock-late.log
+          fi
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

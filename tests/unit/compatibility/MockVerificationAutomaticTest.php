@@ -7,11 +7,11 @@ namespace Deminy\Counit\Tests;
 use Deminy\Counit\TestCase;
 
 /**
- * Mock ->expects() verification runs on the main coroutine as soon as the test body first yields,
- * so a mock must be satisfied before the first yield (a call made only after a sleep/IO yield is
- * verified too early and fails -- a documented limitation). These tests pin the supported pattern:
- * verification of an already-satisfied mock passes and its assertion is counted exactly as under
- * blocking PHPUnit, whether or not the body yields afterwards.
+ * A test that has registered a mock carrying an invocation-count rule is joined at its first
+ * yield (see MockExpectations), so PHPUnit's ->expects() verification runs against the truly
+ * finished body. These tests pin the assertion-counting halves of that: the verification's
+ * assertion is counted exactly once, as under blocking PHPUnit, whether the body yields (the
+ * joined path) or runs to completion synchronously (the native path).
  *
  * @internal
  * @coversNothing
@@ -19,9 +19,9 @@ use Deminy\Counit\TestCase;
 class MockVerificationAutomaticTest extends TestCase
 {
     /**
-     * Two assertions: the assertCount() and the mock verification. The verification happens at the
-     * body's first yield -- before PHPUnit reports the test -- so it is counted within the test's
-     * own window; the late-count correction must not count it a second time.
+     * Two assertions: the assertCount() and the mock verification. The mock makes the test join
+     * at its yield, so both are counted natively, after the finished body; neither the credit nor
+     * the late-count correction may count them a second time.
      */
     public function testMockSatisfiedBeforeYieldIsCounted(): void
     {
