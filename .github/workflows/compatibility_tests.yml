@@ -682,6 +682,25 @@ jobs:
           }
           JSON
 
+      - name: Test Deferred-Failure Reporting Under --repeat
+        # PHPUnit 12.5/13 ship --repeat (and --retry) again. A post-yield failure is invisible at
+        # the repetition boundary under Swoole, so every repetition runs and fails late; the
+        # deferred entries used to share one description-based key, silently overwriting each
+        # other -- only one of N failing repetitions was reported. Each occurrence now gets its
+        # own entry (see Counit::uniqueDeferredKey()) and the run still exits 1. Blocking mode
+        # stops repeating at the first failure natively (the second repetition is skipped).
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist --repeat 2 tests/regression/RepeatFailureTest.php > /tmp/repeat.log 2>&1 || rc=$?
+          cat /tmp/repeat.log
+          test "$rc" -eq 1
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$(grep -c 'RepeatFailureTest::testFailsAfterYield' /tmp/repeat.log)" -eq 2
+            grep -qF 'testFailsAfterYield (2):' /tmp/repeat.log
+          else
+            grep -qF 'Tests: 2, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/repeat.log
+          fi
+
       - name: Test Aggregate Code Coverage
         # Under Swoole, essentially all post-yield test code runs during counit's end-of-run
         # drain -- outside every per-test coverage window -- so the aggregate report used to lose

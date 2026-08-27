@@ -176,11 +176,12 @@ class Counit
                             // synchronously and its native handling applies.
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
-                            self::$deferredSkips[$description] = $e;
-                            LateSkips::markDeferred($testValueObject, $description, $e);
+                            $key                        = self::uniqueDeferredKey($description, self::$deferredSkips);
+                            self::$deferredSkips[$key]  = $e;
+                            LateSkips::markDeferred($testValueObject, $key, $e);
                             self::markAbortedAfterReport($testId);
                         } else {
-                            self::$deferredFailures[$description] = $e;
+                            self::$deferredFailures[self::uniqueDeferredKey($description, self::$deferredFailures)] = $e;
                             self::markAbortedAfterReport($testId);
                         }
                     } else {
@@ -198,10 +199,11 @@ class Counit
                             // signalled from a cleanup into a skipped test with exit code 0, so
                             // it must not be filed as a failure that forces exit code 1.
                             if (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
-                                self::$deferredSkips[$description . ' (deferred cleanup)'] = $e;
-                                LateSkips::markDeferred($testValueObject, $description . ' (deferred cleanup)', $e);
+                                $key                       = self::uniqueDeferredKey($description . ' (deferred cleanup)', self::$deferredSkips);
+                                self::$deferredSkips[$key] = $e;
+                                LateSkips::markDeferred($testValueObject, $key, $e);
                             } else {
-                                self::$deferredFailures[$description . ' (deferred cleanup)'] = $e;
+                                self::$deferredFailures[self::uniqueDeferredKey($description . ' (deferred cleanup)', self::$deferredFailures)] = $e;
                             }
                             self::markAbortedAfterReport($testId);
                         } elseif ($caught === null) {
@@ -612,6 +614,27 @@ class Counit
     public static function declaresNoAssertionsFor(string $testId): bool
     {
         return isset(self::$declaresNoAssertions[$testId]);
+    }
+
+    /**
+     * Returns $description, made unique against the given deferred map. The description is built
+     * from the test's class, method and data-set names, which is not unique across a whole run:
+     * under --repeat (or --retry), the same test method runs several times under the same
+     * description, and a second deferred verdict used to silently overwrite the first -- one
+     * repetition's failure simply vanished from the end-of-run report.
+     *
+     * @param array<string, \Throwable> $map
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function uniqueDeferredKey(string $description, array $map): string
+    {
+        $key = $description;
+        for ($i = 2; isset($map[$key]); $i++) {
+            $key = sprintf('%s (%d)', $description, $i);
+        }
+
+        return $key;
     }
 
     /**

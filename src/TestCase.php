@@ -529,7 +529,9 @@ class TestCase extends BaseTestCase
         $emitter->afterTestMethodFinished($eventTest, ...$methodsInvoked);
 
         if ($thrown !== null) {
-            Counit::$deferredFailures[sprintf('%s::%s (after-test hooks)', static::class, $this->nameWithDataSet())] = $thrown;
+            $description = sprintf('%s::%s (after-test hooks)', static::class, $this->nameWithDataSet());
+
+            Counit::$deferredFailures[Counit::uniqueDeferredKey($description, Counit::$deferredFailures)] = $thrown;
         }
     }
 

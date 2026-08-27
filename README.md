@@ -363,7 +363,7 @@ included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠�
 | `--stop-on-failure` | ⚠️ reacts to pre-yield failures only; in-flight tests finish anyway | ⚠️ same |
 | Result cache / `--order-by=defects` | ⚠️ polluted by provisional passes | ⚠️ same |
 | Code coverage: per-test **attribution** (`--coverage-xml` per-test data; `#[CoversClass]`/`#[CoversFunction]` target filtering of concurrent tests) | ⚠️ wrong by construction — the aggregate report is exact (see the compatible table), but which test a covered line is credited to depends on whose coverage window happened to be open when the coroutine ran it | ⚠️ same |
-| `--repeat` | (option removed in _PHPUnit_ 10+) | ⚠️ runs in blocking mode — correct, but without speedup |
+| `--repeat` / `--retry` (both shipped again as of _PHPUnit_ 12.5) | ❌ verdict-sequencing options: _PHPUnit_ decides between repetitions/attempts, but under _counit_ a post-yield failure only exists once the whole loop has finished. `--repeat N` runs every repetition instead of stopping at the first failing one (blocking skips the rest); each failing repetition is at least reported in the deferred end-of-run block under its own entry, and the exit code stays 1 — the pass/fail signal remains authoritative. `--retry N` is worse — a silent no-op for exactly the flaky post-yield tests it exists for: the test is recorded as passed at its first yield, so the retry machinery never fires (a pre-yield failure retries normally) | ⚠️ `--repeat` runs in blocking mode — correct, but without speedup; `--retry` does not exist on _PHPUnit_ 8/9 |
 
 # Additional Notes
 
