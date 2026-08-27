@@ -124,7 +124,7 @@ What every ⚠️/❌ entry above means in practice — and the caveats behind s
   * In the manual approach, a producer computing its return value inside _Counit::create()_ still loses it (the
     callable's result is only available if it finishes before its first yield). Use _Counit::createAndJoin()_ instead
     for such producers: it runs the callable in a coroutine, waits for it, and returns its value / rethrows its
-    failure — while other tests' coroutines keep running. (On the 0.2.x line, _Counit::create()_ itself joins such
+    failure — while other tests' coroutines keep running. (On the 0.x line, _Counit::create()_ itself joins such
     producers when called directly from the depended-on test method, so the usual by-ref shape works with no test
     changes; _Counit::createAndJoin()_ exists there as well.)
   * A producer with a data provider passes _NULL_ to its dependents — under plain _PHPUnit_ too (it refuses to record
@@ -222,8 +222,8 @@ What every ⚠️/❌ entry above means in practice — and the caveats behind s
     margin.
   * A test body that never yields was timed exactly even before this fix, and still is: the alarm dispatches on the
     running code just as under plain _PHPUnit_.
-  * The 0.2.x line carries the same join-based fix (the root cause is identical there: _PHPUnit_ 8/9's
-    _TestResult::run()_ wraps _runBare()_ in the same `pcntl_alarm()` guard, and 0.2.x's _runBare()_ override used
+  * The 0.x line carries the same join-based fix (the root cause is identical there: _PHPUnit_ 8/9's
+    _TestResult::run()_ wraps _runBare()_ in the same `pcntl_alarm()` guard, and 0.x's _runBare()_ override used
     to return at the body's first yield), with two cosmetic differences: the risky verdict carries php-invoker's
     "Execution aborted after N seconds" message rather than _PHPUnit_'s "This test was aborted" wording, and
     _PHPUnit_ 8/9 count an aborted test's abort and its missing assertions as two risky entries.
