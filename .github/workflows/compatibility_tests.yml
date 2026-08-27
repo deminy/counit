@@ -681,8 +681,9 @@ jobs:
           JSON
 
       - name: Test Deferred-Failure Reporting Under --repeat
-        # PHPUnit 12.5/13 ship --repeat (and --retry) again. A post-yield failure is invisible at
-        # the repetition boundary under Swoole, so every repetition runs and fails late; the
+        # PHPUnit 13 ships --repeat (and --retry) again; neither exists on the 12.5 line, so the
+        # step feature-detects and no-ops there. A post-yield failure is invisible at the
+        # repetition boundary under Swoole, so every repetition runs and fails late; the
         # deferred verdicts used to share one description-based key, silently overwriting each
         # other -- only one of N failing repetitions was reported. Each occurrence now gets its
         # own entry (see Counit::uniqueDeferredKey()) and is replayed as its own native
@@ -691,6 +692,10 @@ jobs:
         # the first failure natively (the second repetition is skipped) -- the sequencing
         # divergence is the documented --repeat residual.
         run: |
+          if ! ./vendor/bin/phpunit --help | grep -qF -- '--repeat'; then
+            echo "--repeat does not exist on this PHPUnit line; skipping"
+            exit 0
+          fi
           rc=0
           ./counit -c phpunit.xml.dist --repeat 2 tests/regression/RepeatFailureTest.php > /tmp/repeat.log 2>&1 || rc=$?
           cat /tmp/repeat.log
