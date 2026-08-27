@@ -537,8 +537,10 @@ jobs:
             grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/mock-fail.log
             ! grep -qF 'already been reported as passed' /tmp/mock-fail.err
             case "$target" in
-              MockFailureTest)      grep -qF 'was expected to be invoked once but was never invoked' /tmp/mock-fail.log ;;
-              MockNeverViolatedTest) grep -qF 'was not expected to be called, actually called 1 time' /tmp/mock-fail.log ;;
+              # PHPUnit 13 reworded both verification failures; the 12.5 line keeps the
+              # legacy phrasing, so each grep accepts either.
+              MockFailureTest)      grep -qE 'was expected to be invoked once but was never invoked|was expected to be called 1 time, actually called 0 times' /tmp/mock-fail.log ;;
+              MockNeverViolatedTest) grep -qE 'was not expected to be called, actually called 1 time|was not expected to be called\.' /tmp/mock-fail.log ;;
             esac
           done
           # Documented residual: a mock created only after the first yield is never verified
@@ -552,7 +554,7 @@ jobs:
           else
             test "$rc" -eq 1
             grep -qF 'Tests: 1, Assertions: 2, Failures: 1.' /tmp/mock-late.log
-            grep -qF 'was expected to be invoked once but was never invoked' /tmp/mock-late.log
+            grep -qE 'was expected to be invoked once but was never invoked|was expected to be called 1 time, actually called 0 times' /tmp/mock-late.log
           fi
 
       - name: Test Post-Yield Diagnostics
@@ -802,10 +804,17 @@ jobs:
           ' "$historyFile"
           php -r '
               $d = new DOMDocument();
-              if (!$d->load("/tmp/history-junit.xml")) { exit(1); }
+              if (!$d->load("/tmp/history-junit.xml")) { fwrite(STDERR, "report not readable\n"); exit(1); }
+              $bad = [];
               foreach ($d->getElementsByTagName("testcase") as $testCase) {
-                  if ((float) $testCase->getAttribute("time") < 1) { exit(1); }
+                  // Every test in this fixture sleeps a second, so a duration anywhere near zero
+                  // means the corrected wall-clock time did not reach the report. The threshold
+                  // is loose on purpose: the point is 0.001-vs-1, not timing precision.
+                  if ((float) $testCase->getAttribute("time") < 0.5) {
+                      $bad[] = sprintf("%s time=[%s]", $testCase->getAttribute("name"), $testCase->getAttribute("time"));
+                  }
               }
+              if ($bad !== []) { fwrite(STDERR, "testcases without a corrected duration:\n  " . implode("\n  ", $bad) . "\n"); exit(1); }
           '
 
       - name: Test Aggregate Code Coverage
