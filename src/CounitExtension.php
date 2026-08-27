@@ -111,6 +111,10 @@ final class CounitExtension implements Extension
 
                     if ($test->isTestMethod()) {
                         Attribution::installShims($test->className());
+                        // Wall-clock stamp for the test's real duration (PHPUnit's own telemetry
+                        // only sees time-to-first-yield for a non-joined test); see
+                        // Counit::recordTestStarting()/HistoryCorrector.
+                        Counit::recordTestStarting($test->id());
 
                         // The barrier half of the #[BackupGlobals]/#[BackupStaticProperties]/
                         // #[WithEnvironmentVariable] support (see GlobalState): drain every
@@ -296,6 +300,13 @@ final class CounitExtension implements Extension
                     HandlerIsolation::emitDeferred();
 
                     JunitXmlCorrector::correct();
+
+                    // After every late emit: the replayed Failed/Errored/Skipped/ConsideredRisky
+                    // events have updated PHPUnit's in-memory test-run history (its handler rides
+                    // the same dispatcher), but the file was already persisted at the root
+                    // TestSuite\Finished event -- before any of this. Re-persist it with the late
+                    // verdicts and the real durations. See HistoryCorrector.
+                    HistoryCorrector::correct();
 
                     $delta = Assert::getCount() - Counit::$creditedAssertionCount + Counit::lateAssertionCount();
                     if ($delta !== 0) {

@@ -108,6 +108,30 @@ class Counit
     private static array $declaresNoAssertions = [];
 
     /**
+     * Per test ID: the hrtime(true) stamp taken at the test's Test\PreparationStarted event (on
+     * the main coroutine, before setUp()). Together with the coroutine-finish stamp this yields
+     * the test's real wall-clock duration -- what a blocking run would have measured -- where
+     * PHPUnit's own telemetry only ever sees time-to-first-yield for a non-joined test. See
+     * recordTestDuration().
+     *
+     * @var array<string, int>
+     */
+    private static array $testStartTimes = [];
+
+    /**
+     * Per test ID: the test's event value object and measured wall-clock duration in seconds,
+     * recorded when its coroutine truly finishes (body, relocated hooks and deferred cleanups
+     * included). The maximum wins: a test may wrap several coroutines (manual approach), and the
+     * last one to finish defines the test's real end. Consumed by JunitXmlCorrector (the `time`
+     * attributes) and HistoryCorrector (the test-run history's `times` map). Approximate under
+     * concurrency -- a coroutine also waits for its turn on the scheduler while others run -- but
+     * of blocking's magnitude, never the 0.001-for-a-1s-test garbage the raw telemetry records.
+     *
+     * @var array<string, array{test: \PHPUnit\Event\Code\Test, seconds: float}>
+     */
+    private static array $testDurations = [];
+
+    /**
      * To run test cases asynchronously when running unit tests using counit (and with the Swoole extension enabled).
      * If the Swoole extension is not enabled, or counit is not in use, the test cases will be executed in the same way
      * as under PHPUnit.
@@ -220,6 +244,10 @@ class Counit
                     // $finalAssertionCounts.
                     if ($caller instanceof TestCase) {
                         self::recordFinalAssertionCount($caller);
+                    }
+
+                    if ($testValueObject !== null) {
+                        self::recordTestDuration($testValueObject->id(), $testValueObject);
                     }
 
                     [$capturedOutput, $outputLevelDelta] = OutputCapture::stop($obHandle);
@@ -621,6 +649,40 @@ class Counit
     }
 
     /**
+     * Stamps the start of a test's wall-clock window. Called from CounitExtension's
+     * Test\PreparationStarted subscriber -- before setUp(), the same point PHPUnit's own
+     * per-test telemetry effectively starts from.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function recordTestStarting(string $testId): void
+    {
+        self::$testStartTimes[$testId] = (int) hrtime(true);
+    }
+
+    /**
+     * The test's measured wall-clock duration in seconds, or null when none was recorded.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function durationFor(string $testId): ?float
+    {
+        return isset(self::$testDurations[$testId]) ? self::$testDurations[$testId]['seconds'] : null;
+    }
+
+    /**
+     * Every measured duration, keyed by test ID; see $testDurations.
+     *
+     * @return array<string, array{test: \PHPUnit\Event\Code\Test, seconds: float}>
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function measuredDurations(): array
+    {
+        return self::$testDurations;
+    }
+
+    /**
      * Returns $description, made unique against the given deferred map. The description is built
      * from the test's class, method and data-set names, which is not unique across a whole run:
      * under --repeat (or --retry), the same test method runs several times under the same
@@ -639,6 +701,22 @@ class Counit
         }
 
         return $key;
+    }
+
+    /**
+     * Records the test's duration as of now; see $testDurations. The maximum wins.
+     */
+    private static function recordTestDuration(string $testId, \PHPUnit\Event\Code\Test $test): void
+    {
+        if (!isset(self::$testStartTimes[$testId])) {
+            return;
+        }
+
+        $seconds = ((int) hrtime(true) - self::$testStartTimes[$testId]) / 1_000_000_000;
+
+        if (!isset(self::$testDurations[$testId]) || self::$testDurations[$testId]['seconds'] < $seconds) {
+            self::$testDurations[$testId] = ['test' => $test, 'seconds' => $seconds];
+        }
     }
 
     /**

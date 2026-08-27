@@ -84,6 +84,8 @@ class JunitXmlCorrector
             // half-corrected report would be worse than an uncorrected one.
             /** @var list<array{\DOMElement, int}> $corrections */
             $corrections = [];
+            /** @var list<array{\DOMElement, float}> $timeCorrections */
+            $timeCorrections = [];
 
             foreach ($document->getElementsByTagName('testcase') as $testCase) {
                 if (!$testCase->hasAttribute('class')) {
@@ -104,17 +106,33 @@ class JunitXmlCorrector
                 if ($corrected !== null && $testCase->hasAttribute('assertions')) {
                     $corrections[] = [$testCase, $corrected];
                 }
+
+                // The logger's `time` attribute measured Prepared->Finished, which for a
+                // non-joined test is time-to-first-yield (0.001s for a 1s test); replace it with
+                // the coroutine's measured wall-clock duration -- approximately what a blocking
+                // run reports. See Counit::recordTestDuration().
+                $duration = Counit::durationFor($testId);
+                if ($duration !== null && $testCase->hasAttribute('time')) {
+                    $timeCorrections[] = [$testCase, $duration];
+                }
             }
 
             foreach ($corrections as [$testCase, $corrected]) {
                 $testCase->setAttribute('assertions', (string) $corrected);
             }
 
+            foreach ($timeCorrections as [$testCase, $duration]) {
+                $testCase->setAttribute('time', sprintf('%F', $duration));
+            }
+
             self::writeDeferredVerdicts($document);
 
             // Recompute every testsuite aggregate from its (now corrected) descendant testcases.
             // The failures/errors/skipped aggregates count the verdict elements just written (and
-            // PHPUnit's own), so the report's counters match its contents.
+            // PHPUnit's own), so the report's counters match its contents; the time aggregate is
+            // only recomputed when a testcase time was actually rewritten (sums of per-test
+            // durations, blocking's own semantics -- under concurrency they overlap, so the sum
+            // exceeds the run's real wall time exactly as blocking's total would).
             foreach ($document->getElementsByTagName('testsuite') as $testSuite) {
                 foreach (['assertions' => null, 'failures' => 'failure', 'errors' => 'error', 'skipped' => 'skipped'] as $attribute => $verdictElement) {
                     if (!$testSuite->hasAttribute($attribute)) {
@@ -130,6 +148,14 @@ class JunitXmlCorrector
                         }
                     }
                     $testSuite->setAttribute($attribute, (string) $total);
+                }
+
+                if ($timeCorrections !== [] && $testSuite->hasAttribute('time')) {
+                    $total = 0.0;
+                    foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
+                        $total += (float) $testCase->getAttribute('time');
+                    }
+                    $testSuite->setAttribute('time', sprintf('%F', $total));
                 }
             }
         } catch (\Throwable) {
@@ -225,41 +251,62 @@ class JunitXmlCorrector
      */
     public static function junitLogger(): ?JunitXmlLogger
     {
+        foreach (self::registeredSubscribers() as $subscriber) {
+            if (!$subscriber instanceof JunitSubscriber) {
+                continue;
+            }
+
+            $logger = (new \ReflectionProperty(JunitSubscriber::class, 'logger'))->getValue($subscriber);
+            if ($logger instanceof JunitXmlLogger) {
+                return $logger;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Every subscriber registered with the event dispatcher, flattened. Shared by junitLogger()
+     * above and by HistoryCorrector (the test-run-history handler is reached the same way).
+     * Empty on any shape mismatch.
+     *
+     * @return list<object>
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function registeredSubscribers(): array
+    {
         $facade = EventFacade::instance();
 
         $deferring = (new \ReflectionProperty($facade, 'deferringDispatcher'))->getValue($facade);
         if (!$deferring instanceof DeferringDispatcher) {
-            return null;
+            return [];
         }
 
         $dispatcher = (new \ReflectionProperty($deferring, 'dispatcher'))->getValue($deferring);
         if (!$dispatcher instanceof DirectDispatcher) {
-            return null;
+            return [];
         }
 
         $subscribers = (new \ReflectionProperty($dispatcher, 'subscribers'))->getValue($dispatcher);
         if (!is_array($subscribers)) {
-            return null;
+            return [];
         }
 
+        $flattened = [];
         foreach ($subscribers as $subscribersOfType) {
             if (!is_array($subscribersOfType)) {
                 continue;
             }
 
             foreach ($subscribersOfType as $subscriber) {
-                if (!$subscriber instanceof JunitSubscriber) {
-                    continue;
-                }
-
-                $logger = (new \ReflectionProperty(JunitSubscriber::class, 'logger'))->getValue($subscriber);
-                if ($logger instanceof JunitXmlLogger) {
-                    return $logger;
+                if (is_object($subscriber)) {
+                    $flattened[] = $subscriber;
                 }
             }
         }
 
-        return null;
+        return $flattened;
     }
 
     /**

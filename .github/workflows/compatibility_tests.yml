@@ -745,6 +745,46 @@ jobs:
               ));
           '
 
+      - name: Test Run History And Duration Corrections
+        # PHPUnit persists its test-run history (PHPUnit 13; the result cache on 12.5, different
+        # file name, same JSON shape) when the root suite finishes -- before counit's drain -- so
+        # a post-yield failure used to be recorded as a pass, actively ERASING defects a previous
+        # run had written (--order-by=defects lost exactly the tests it exists to front-load),
+        # and every recorded duration was time-to-first-yield (0.001s for a 1s test; JUnit `time`
+        # attributes had the same garbage). counit now re-persists the history after the late
+        # emits and overwrites the times -- in the file and in the JUnit report -- with measured
+        # wall-clock durations (see HistoryCorrector). Expected content is identical with and
+        # without Swoole: the three post-yield defects present, the genuinely passing test's
+        # entry absent, and every duration of a 1s-sleeping test at least 1s.
+        run: |
+          rm -rf /tmp/history
+          rc=0
+          ./counit -c phpunit.xml.dist --cache-directory /tmp/history --log-junit /tmp/history-junit.xml tests/regression/LateFailureTest.php > /dev/null 2>&1 || rc=$?
+          test "$rc" -eq 2
+          historyFile="/tmp/history/$(ls -A /tmp/history | head -1)"
+          cat "$historyFile"; echo
+          php -r '
+              $prefix  = "Deminy\\Counit\\Tests\\LateFailureTest::";
+              $history = json_decode((string) file_get_contents($argv[1]), true);
+              $defects = $history["defects"] ?? [];
+              $times   = $history["times"] ?? [];
+              exit((int) !(
+                  isset($defects[$prefix . "testFailsAfterYield"])
+                  && isset($defects[$prefix . "testErrorsAfterYield"])
+                  && isset($defects[$prefix . "testDataSetFailsAfterYield with data set \"failing set\""])
+                  && !isset($defects[$prefix . "testPassesAfterYield"])
+                  && ($times[$prefix . "testPassesAfterYield"] ?? 0) >= 1
+                  && ($times[$prefix . "testFailsAfterYield"] ?? 0) >= 1
+              ));
+          ' "$historyFile"
+          php -r '
+              $d = new DOMDocument();
+              if (!$d->load("/tmp/history-junit.xml")) { exit(1); }
+              foreach ($d->getElementsByTagName("testcase") as $testCase) {
+                  if ((float) $testCase->getAttribute("time") < 1) { exit(1); }
+              }
+          '
+
       - name: Test Aggregate Code Coverage
         # Under Swoole, essentially all post-yield test code runs during counit's end-of-run
         # drain -- outside every per-test coverage window -- so the aggregate report used to lose
