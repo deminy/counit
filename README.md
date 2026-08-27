@@ -426,6 +426,22 @@ faster, with limitations apply. Here is a list of limitations of this package:
     line — the same cosmetic as the deferred risky verdicts' stray `R`.
   * Should a replay ever fail, the affected tests are listed in a STDERR notice instead — degraded, never a wrong
     count.
+* Diagnostics (deprecations/warnings/notices) triggered after a test's first sleep/IO yield are converted again.
+  _PHPUnit_ 8/9 convert them into exceptions thrown at the call site, through an error handler that
+  `TestResult::run()` registers **outside** `runBare()` — so the "whole `runBare()` runs inside the coroutine"
+  property does not reach it, and a post-yield convertible diagnostic used to hit no handler at all, in **both**
+  approaches: the test silently passed (exit code 0) where blocking mode errors it (exit code 2). _counit_ now
+  registers a delegating handler of its own for exactly the windows _PHPUnit_'s cannot cover — while the coroutine
+  _PHPUnit_ runs on is suspended, which is the only time test coroutines can run — and hands every diagnostic to
+  _PHPUnit_'s own converting handler (the run's `convert*ToExceptions` settings, `@`-suppression semantics and
+  exception classes all stay _PHPUnit_'s own): the exact `Error\*` exception is thrown at the trigger site, the body
+  aborts, and the verdict lands in the deferred end-of-run failure block with exit code 1 — blocking errors the
+  test natively with exit code 2, this branch's standard post-yield reporting model. Notes:
+  * The handler is deliberately not left registered permanently: _PHPUnit_ 8/9's own handler registration gives up
+    when any handler is already on the stack, so a permanent one would silently disable conversion for every
+    following test. It is armed only across the main coroutine's own yields, all of which _counit_ controls.
+  * A diagnostic triggered before the first yield converts natively in both modes, and a `@`-suppressed one stays
+    suppressed; a run with every `convert*ToExceptions` setting off converts nothing, exactly as blocking.
 * Option `--enforce-time-limit` (with `--default-time-limit` and the `@small`/`@medium`/`@large` size annotations)
   works with exact _PHPUnit_ semantics — at the price of the run's concurrency. _PHPUnit_ 8/9 time a limited test by
   wrapping the whole _runBare()_ call in a `pcntl_alarm()`/`SIGALRM` guard (package _phpunit/php-invoker_) and disarm

@@ -27,6 +27,11 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
         // credit/late arithmetic in Counit::correctedAssertionCountFor().
         Attribution::$enabled = Helper::isCoroutineFriendly()
             && !filter_var((string) ini_get('swoole.enable_preemptive_scheduler'), FILTER_VALIDATE_BOOLEAN);
+
+        if (Helper::isCoroutineFriendly()) {
+            // Convert diagnostics a test triggers after its first yield; see Diagnostics.
+            Diagnostics::initialize();
+        }
     }
 
     /**
@@ -65,9 +70,14 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
 
             // When the only coroutine left is the one created in script /counit, it means all the tests are finally
             // done, and it's time to hand it over to PHPUnit to take care of the rest part.
+            // The drain is the main coroutine's longest yield of the run and the one most
+            // post-yield test code runs in; it does not go through Attribution's observation
+            // points, so counit's converting handler is put on the stack for it here.
+            Diagnostics::suspended();
             while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
                 Coroutine::sleep(0.2);
             }
+            Diagnostics::resumed();
 
             // Correct the run's reported assertion total. PHPUnit attributes assertions to tests
             // through a per-test window over a static counter, so under counit every real assertion

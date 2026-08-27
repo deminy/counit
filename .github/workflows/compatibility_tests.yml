@@ -486,6 +486,42 @@ jobs:
             grep -qF 'actually called 0 times' /tmp/mock-late.log
           fi
 
+      - name: Test Post-Yield Diagnostics
+        # PHPUnit 8/9 convert deprecations/notices/warnings into exceptions thrown at the call
+        # site, through an error handler TestResult::run() registers OUTSIDE runBare() -- so a
+        # post-yield convertible diagnostic used to hit no handler at all, in BOTH approaches:
+        # the test silently PASSED (exit 0) where blocking mode errors it (exit 2). counit now
+        # arms a delegating handler while the coroutine PHPUnit runs on is suspended and hands
+        # each diagnostic to PHPUnit's own converting handler, which throws the exact Error\*
+        # exception at the trigger site -- the body aborts into the deferred-failure block, exit
+        # code 1 (see Diagnostics). Each mode's exact output is asserted; what both must share
+        # is that the run FAILS. The pre-yield conversion and @-suppression stay native in both.
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/PostYieldDiagnosticsTest.php > /tmp/diag.log 2> /tmp/diag.err || rc=$?
+          cat /tmp/diag.log /tmp/diag.err
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 1
+            grep -qF 'Tests: 4, Assertions: 1, Errors: 1.' /tmp/diag.log
+            grep -qF 'testNoticeAfterYield: late user notice' /tmp/diag.err
+            grep -qF 'testWarningAfterYield: late user warning' /tmp/diag.err
+          else
+            test "$rc" -eq 2
+            grep -qF 'Tests: 4, Assertions: 1, Errors: 3.' /tmp/diag.log
+          fi
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/PostYieldDiagnosticsManualTest.php > /tmp/diag.log 2> /tmp/diag.err || rc=$?
+          cat /tmp/diag.log /tmp/diag.err
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 1
+            grep -qF 'OK (2 tests, 0 assertions)' /tmp/diag.log
+            grep -qF 'testNoticeAfterYield: late user notice (manual)' /tmp/diag.err
+            grep -qF 'testWarningAfterYield: late user warning (manual)' /tmp/diag.err
+          else
+            test "$rc" -eq 2
+            grep -qF 'Tests: 2, Assertions: 0, Errors: 2.' /tmp/diag.log
+          fi
+
       - name: Test Useless-Test Detection
         # The "did not perform any assertions" risky check (and its mirror, the
         # doesNotPerformAssertions-annotation check) reads the count the moment runBare()

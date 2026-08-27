@@ -159,6 +159,11 @@ class Attribution
      */
     public static function suspended(): void
     {
+        // While the coroutine PHPUnit runs on is suspended, no converting handler of PHPUnit's is
+        // on the stack; counit supplies one for the test coroutines that run in that window. See
+        // Diagnostics. Before the enabled check, so the push and the pop always come in pairs.
+        Diagnostics::suspended();
+
         if (!self::$enabled) {
             return;
         }
@@ -181,6 +186,8 @@ class Attribution
      */
     public static function resumed(): void
     {
+        Diagnostics::resumed();
+
         if (!self::$enabled) {
             return;
         }

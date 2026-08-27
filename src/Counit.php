@@ -227,6 +227,7 @@ class Counit
 
             $id = Coroutine::create(function () use ($callable, $caller, $key, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($key);
+                Diagnostics::coroutineStarted();
                 $obHandle = $captureOutput ? OutputCapture::start() : null;
 
                 try {
@@ -273,6 +274,7 @@ class Counit
                     $finished = true;
 
                     Attribution::coroutineFinished();
+                    Diagnostics::coroutineFinished();
                     // Unconditional, so a join decided only after this coroutine already finished
                     // (its whole body ran without yielding) still pops instantly instead of
                     // blocking forever on an empty channel.
@@ -478,6 +480,7 @@ class Counit
 
         Coroutine::create(function () use ($callable, $key, $done, &$result, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta): void {
             Attribution::coroutineStarted($key);
+            Diagnostics::coroutineStarted();
             $obHandle = $captureOutput ? OutputCapture::start() : null;
 
             try {
@@ -490,6 +493,7 @@ class Counit
                 }
 
                 Attribution::coroutineFinished();
+                Diagnostics::coroutineFinished();
                 $done->push(true);
             }
         });
