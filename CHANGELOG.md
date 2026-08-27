@@ -8,6 +8,43 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.1 - 2026-08-27
+
+Documentation and diagnostics release for the 1.x series. The supported PHPUnit and PHP versions are unchanged
+(~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no test needs changing.
+
+**Upgrade note.** A run whose `phpunit.xml` does not register `CounitExtension` now prints one notice line on
+STDERR. Exit codes are untouched, and `COUNIT_SILENCE_TEARDOWN_NOTICE=1` silences it alongside counit's other
+notices.
+
+### Added
+
+- **A missing `CounitExtension` registration is announced instead of quietly invalidating the run.** The extension
+  is what waits for every coroutine to drain before PHPUnit takes its summary; without it nothing does, so the run
+  reports a time that can understate the truth by orders of magnitude and assertion totals that are neither correct
+  nor consistent between a full run and the same tests run in isolation — while exiting 0 and looking entirely
+  healthy. The run's first coroutine now writes a notice to STDERR naming the omission, what it costs, and the
+  `<extensions><bootstrap class="Deminy\Counit\CounitExtension"/></extensions>` element that fixes it. Registration
+  is observed through the extension's own `bootstrap()` call, which PHPUnit makes once per registered extension, so
+  a correctly configured run cannot be false-accused; a run without Swoole, or a suite that creates no coroutine,
+  stays quiet. (bdf94f9)
+
+### Changes
+
+- **`CounitExtension` is documented as required, not optional.** README.md listed registering it under "Optional
+  steps" and [`docs/compatibility.md`](docs/compatibility.md) never mentioned it at all, though nearly every
+  guarantee in that matrix depends on it. Both now say so, and both record that the registration element differs by
+  release line — `<bootstrap class>` on PHPUnit 10+ (counit `^1.1`) versus `<extension class>` on PHPUnit 8/9
+  (counit `^0.3`), since the class implements different interfaces on each — so a snippet copied across lines fails
+  silently. The class docblock carries the snippet too, for anyone arriving from a stack trace rather than the
+  README. (8fd6b81)
+- **The install instructions point at the current releases.** The documented constraint `~1.0.0` reads as
+  >= 1.0.0 < 1.1.0, so anyone following the README pinned themselves to the previous line. It is now `^1.1`, which
+  picks up future 1.x minors; the maintenance line's row becomes `^0.3`, which stops at the next 0.x minor — on a
+  zero-major, where a breaking change may land. (054cd4c)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.0...1.1.1
+
 ## 1.1.0 - 2026-08-27
 
 A compatibility release: where a counit run used to diverge from a plain PHPUnit run, it now matches. Supported
@@ -127,6 +164,46 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.1 - 2026-08-27
+
+Documentation and diagnostics release for the PHPUnit 8/9 maintenance series, mirroring 1.1.1. Supported versions
+are unchanged (PHPUnit ~8.0 / ~9.0 on PHP >= 7.2), and no test needs changing.
+
+**Upgrade note.** A run whose `phpunit.xml` does not register `CounitExtension` now prints one notice line on
+STDERR. Exit codes are untouched, and `COUNIT_SILENCE_TEARDOWN_NOTICE=1` silences it alongside counit's other
+notices.
+
+### Added
+
+- **A missing `CounitExtension` registration is announced instead of quietly invalidating the run.** The extension
+  is what waits for every coroutine to drain before PHPUnit takes its summary; without it nothing does, so the run
+  reports a time that can understate the truth by orders of magnitude and assertion totals that are neither correct
+  nor consistent between a full run and the same tests run in isolation — while exiting 0 and looking entirely
+  healthy. The run's first coroutine now writes a notice to STDERR naming the omission, what it costs, and the
+  `<extensions><extension class="Deminy\Counit\CounitExtension"/></extensions>` element that fixes it. PHPUnit 8/9
+  have no extension `bootstrap()` method, so registration is observed through the `BeforeFirstTestHook` this class
+  already implements — PHPUnit calls it for every registered extension before the first test — which no
+  configuration shape can register the extension without firing; a run without Swoole, or a suite that creates no
+  coroutine, stays quiet. Verified on PHPUnit 9.6.36 and on 8.0.6, the matrix floor. (d2742ec)
+
+### Changes
+
+- **`CounitExtension` is documented as required, not optional.** README.md listed registering it under "Optional
+  steps" and [`docs/compatibility.md`](docs/compatibility.md) never mentioned it at all, though nearly every
+  guarantee in that matrix depends on it. Both now say so, and both record
+  that the registration element differs by release line — `<extension class>` on PHPUnit 8/9 (counit `^0.3`) versus
+  `<bootstrap class>` on PHPUnit 10+ (counit `^1.1`), since the class implements different interfaces on each — so
+  a snippet copied across lines fails silently. The class docblock carries the snippet too, for anyone arriving
+  from a stack trace rather than the README. (9e01e12)
+- **The install instructions point at the current releases.** The documented constraint `~0.2.0` reads as
+  >= 0.2.0 < 0.3.0, so anyone following the README pinned themselves to the previous line. It is now `^0.3`, which
+  stops at the next 0.x minor — on a zero-major, where a breaking change may land, and the opt-in boundary 0.3.0's
+  behavioral changes want; the table's 1.x rows become `^1.1` in step. The branch note is corrected as well: it
+  promised bug fixes and security updates only, which 0.3.0 was not — this line now takes the compatibility work
+  the 1.x line develops, back-ported where it applies. (8243c5c)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.3.0...0.3.1
 
 ## 0.3.0 - 2026-08-27
 
