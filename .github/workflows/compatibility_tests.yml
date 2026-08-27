@@ -835,5 +835,7 @@ jobs:
             --coverage-filter tests/regression/support --coverage-text \
             tests/regression/CoverageDrainTest.php | tee /tmp/coverage.log
           grep -qF 'OK (3 tests, 6 assertions)' /tmp/coverage.log
-          grep -qF '66.66% (2/3)' /tmp/coverage.log
-          grep -qF '62.50% (5/8)' /tmp/coverage.log
+          # Ratios, not percentages: php-code-coverage rounds 2/3 to 66.66% on the PHPUnit 13
+          # line and 66.67% on the 12.5 one, while the counts are identical.
+          grep -qF '(2/3)' /tmp/coverage.log
+          grep -qF '(5/8)' /tmp/coverage.log
