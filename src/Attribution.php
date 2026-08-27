@@ -132,6 +132,10 @@ final class Attribution
         // lift the suspending coroutine's own handlers off the shared stacks. See
         // HandlerIsolation.
         HandlerIsolation::sliceEnded();
+        // While the coroutine PHPUnit runs on is suspended, no converting handler of PHPUnit's is
+        // on the stack; counit supplies one for the test coroutines that run in that window. See
+        // Diagnostics.
+        Diagnostics::suspended();
 
         if (!self::$enabled) {
             return;
@@ -153,6 +157,10 @@ final class Attribution
     /** The current coroutine has just been resumed: re-claim the counter for its owner. */
     public static function resumed(): void
     {
+        // Symmetric with the push in suspended() above, and before the enabled check for the same
+        // reason: the two must always come in pairs. See Diagnostics.
+        Diagnostics::resumed();
+
         if (!self::$enabled) {
             return;
         }

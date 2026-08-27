@@ -85,6 +85,10 @@ final class CounitExtension implements Extension
             // only slices Attribution can vouch for, so it degrades to a no-op alongside it.
             HandlerIsolation::$enabled = true;
 
+            // Convert diagnostics (deprecations/warnings/notices) a test triggers after its first
+            // yield, which PHPUnit's own converting handler no longer sees; see Diagnostics.
+            Diagnostics::initialize();
+
             // The reverse #[Depends] graph has to be known before the first producer runs, and
             // this event carries the whole (already flattened) suite. See DependencyMap.
             $facade->registerSubscriber(new class implements TestSuiteLoadedSubscriber {
@@ -237,9 +241,15 @@ final class CounitExtension implements Extension
 
                     // When the only coroutine left is the one created in script /counit, it means all the tests are
                     // finally done, and it's time to hand it over to PHPUnit to take care of the rest part.
+                    // The drain is the main coroutine's longest yield of the run and the one
+                    // most post-yield test code runs in; it does not go through Attribution's
+                    // observation points, so counit's converting handler is put on the stack for
+                    // it here. See Diagnostics.
+                    Diagnostics::suspended();
                     while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
                         Coroutine::sleep(0.2);
                     }
+                    Diagnostics::resumed();
 
                     // Correct the run's reported assertion total. PHPUnit attributes assertions to
                     // tests through a per-test window over a static counter, so under counit every

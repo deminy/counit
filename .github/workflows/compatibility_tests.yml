@@ -535,6 +535,69 @@ jobs:
             grep -qF 'was expected to be invoked once but was never invoked' /tmp/mock-late.log
           fi
 
+      - name: Test Post-Yield Diagnostics
+        # PHPUnit's converting error handler is disabled the moment the test-method invocation
+        # returns -- the first yield -- so a deprecation/warning/notice a test triggered after it
+        # used to reach PHP's default handler: printed raw, absent from the summary counts, the
+        # --display-* listings, the baseline and the --fail-on-* exit codes. counit now arms a
+        # delegating handler for exactly the windows PHPUnit's own cannot cover (while the
+        # coroutine PHPUnit runs on is suspended) and hands each diagnostic to PHPUnit's own
+        # ErrorHandler at trigger time, so attribution and every downstream decision stay
+        # upstream code (see Diagnostics). The failure mode is silent -- a lost diagnostic
+        # lowers a count without failing the run -- so the exact blocking-mode summaries are
+        # asserted, identical with and without Swoole, plus the absence of raw diagnostic text.
+        run: |
+          for target in PostYieldDiagnosticsTest PostYieldDiagnosticsManualTest PostYieldDiagnosticsAttributionTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/diag.log 2> /tmp/diag.err || rc=$?
+            cat /tmp/diag.log /tmp/diag.err
+            test "$rc" -eq 0
+            # Raw PHP diagnostic text is the signature of an unconverted diagnostic ...
+            ! grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.log
+            ! grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.err
+            # ... and nothing may surface as a deferred end-of-run failure.
+            ! grep -qF 'already been reported as passed' /tmp/diag.err
+            case "$target" in
+              PostYieldDiagnosticsTest)            grep -qF 'Tests: 6, Assertions: 6, Warnings: 2, Deprecations: 2, Notices: 1.' /tmp/diag.log ;;
+              PostYieldDiagnosticsManualTest)      grep -qF 'Tests: 2, Assertions: 2, Warnings: 1, Deprecations: 1.' /tmp/diag.log ;;
+              PostYieldDiagnosticsAttributionTest) grep -qF 'Tests: 2, Assertions: 2, Deprecations: 1.' /tmp/diag.log ;;
+            esac
+          done
+          # The late diagnostics appear in the listings with their real messages, the baseline
+          # captures them, and the --fail-on-* exit codes are exact in both modes.
+          ./counit -c phpunit.xml.dist --display-deprecations --display-warnings --display-notices tests/regression/PostYieldDiagnosticsTest.php > /tmp/diag-list.log 2> /dev/null
+          grep -qF 'late user deprecation' /tmp/diag-list.log
+          grep -qF 'late user warning' /tmp/diag-list.log
+          grep -qF 'late user notice' /tmp/diag-list.log
+          ./counit -c phpunit.xml.dist --generate-baseline /tmp/diag-baseline.xml tests/regression/PostYieldDiagnosticsTest.php > /dev/null 2>&1
+          grep -qF 'late user deprecation' /tmp/diag-baseline.xml
+          rc=0; ./counit -c phpunit.xml.dist --fail-on-deprecation tests/regression/PostYieldDiagnosticsManualTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+          rc=0; ./counit -c phpunit.xml.dist --fail-on-warning     tests/regression/PostYieldDiagnosticsManualTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+          rc=0; ./counit -c phpunit.xml.dist --fail-on-notice      tests/regression/PostYieldDiagnosticsTest.php       > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+          # Attribution: two tests trigger the same deprecation from the same line after
+          # different sleeps (reversed completion order); the listing must name BOTH.
+          ./counit -c phpunit.xml.dist --display-deprecations tests/regression/PostYieldDiagnosticsAttributionTest.php > /tmp/diag-attr.log 2> /dev/null
+          grep -qF '2 tests triggered 1 deprecation' /tmp/diag-attr.log
+          grep -qF 'PostYieldDiagnosticsAttributionTest::testAFirst' /tmp/diag-attr.log
+          grep -qF 'PostYieldDiagnosticsAttributionTest::testBSecond' /tmp/diag-attr.log
+          # E_USER_ERROR after a yield: PHPUnit's handler throws for it, and the delegation lets
+          # that abort the body -- a deferred failure with exit code 1 under Swoole (blocking
+          # errors the test natively, exit code 2; the 1-vs-2 divergence is the documented
+          # residual). Before the fix the run was KILLED with exit code 255 in Swoole mode.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/PostYieldUserErrorTest.php > /tmp/diag-ue.log 2> /tmp/diag-ue.err || rc=$?
+          cat /tmp/diag-ue.log /tmp/diag-ue.err
+          ! grep -qF 'Fatal error' /tmp/diag-ue.log
+          ! grep -qF 'Fatal error' /tmp/diag-ue.err
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            test "$rc" -eq 1
+            grep -qF 'Tests: 1, Assertions: 0, Errors: 1, Deprecations: 1.' /tmp/diag-ue.log
+            grep -qF 'E_USER_ERROR was triggered' /tmp/diag-ue.err
+          else
+            test "$rc" -eq 2
+            grep -qF 'Tests: 1, Assertions: 0, Errors: 2, Deprecations: 1.' /tmp/diag-ue.log
+          fi
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
         # Test\Finished events, so under Swoole they used to carry the up-front assertion credit

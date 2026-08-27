@@ -159,6 +159,7 @@ class Counit
 
             $id = Coroutine::create(function () use ($callable, $caller, $testId, $testValueObject, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, &$capturedOutput, &$outputLevelDelta, $description): void {
                 Attribution::coroutineStarted($testId);
+                Diagnostics::coroutineStarted($caller);
                 HandlerIsolation::sliceStarted();
                 $obHandle = OutputCapture::start();
 
@@ -238,6 +239,7 @@ class Counit
                     // end-of-run verdict emit. See HandlerIsolation.
                     HandlerIsolation::coroutineFinished($testId);
                     Attribution::coroutineFinished();
+                    Diagnostics::coroutineFinished();
                     $done->push(true);
                 }
             });
@@ -552,6 +554,7 @@ class Counit
 
         Coroutine::create(function () use ($callable, $caller, $testId, $done, &$result, &$thrown, &$capturedOutput, &$outputLevelDelta): void {
             Attribution::coroutineStarted($testId);
+            Diagnostics::coroutineStarted($caller);
             HandlerIsolation::sliceStarted();
             $obHandle = OutputCapture::start();
 
@@ -578,6 +581,7 @@ class Counit
                 // See create() -- same leak recording for the joined path.
                 HandlerIsolation::coroutineFinished($testId);
                 Attribution::coroutineFinished();
+                Diagnostics::coroutineFinished();
                 $done->push(true);
             }
         });
