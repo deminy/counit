@@ -110,8 +110,11 @@ final class UselessTests
     public static function emitDeferred(): void
     {
         // Without segment accounting (Swoole's preemptive scheduler) no per-test tally exists,
-        // so nothing can be proved and nothing is reported.
-        if (!self::$reportUselessTests || !Attribution::$enabled) {
+        // so nothing can be proved and nothing is reported. The reportUselessTests setting is
+        // NOT checked here: PHPUnit gates only the "did not perform any assertions" verdict on
+        // it (TestRunner::run()), while the mirror verdict for a declared-none test that did
+        // assert fires unconditionally -- so this pass has to make the same distinction, below.
+        if (!Attribution::$enabled) {
             return;
         }
 
@@ -148,7 +151,7 @@ final class UselessTests
                 continue;
             }
 
-            if ($count !== 0) {
+            if ($count !== 0 || !self::$reportUselessTests) {
                 continue;
             }
 

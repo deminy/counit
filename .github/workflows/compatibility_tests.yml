@@ -405,10 +405,14 @@ jobs:
         # untrustworthy tally must never become a false accusation -- flagged without it).
         run: |
           for target in UselessTestTest UselessTestManualTest UselessTestSiblingTest; do
+            # --do-not-report-useless-tests silences the "did not perform any assertions"
+            # verdict only: PHPUnit gates that one on reportUselessTests() but emits the mirror
+            # verdict unconditionally (TestRunner::run()), so the declared-none-but-asserting
+            # sibling fixture stays risky in the quiet state -- in both modes.
             case "$target" in
               UselessTestTest)        plain='Tests: 3, Assertions: 1, Risky: 2.'; quiet='OK (3 tests, 1 assertion)' ;;
               UselessTestManualTest)  plain='Tests: 2, Assertions: 1, Risky: 1.'; quiet='OK (2 tests, 1 assertion)' ;;
-              UselessTestSiblingTest) plain='Tests: 2, Assertions: 2, Risky: 2.'; quiet='OK (2 tests, 2 assertions)' ;;
+              UselessTestSiblingTest) plain='Tests: 2, Assertions: 2, Risky: 2.'; quiet='Tests: 2, Assertions: 2, Risky: 2.' ;;
             esac
             rc=0
             ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/useless.log 2>&1 || rc=$?
