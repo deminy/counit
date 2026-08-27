@@ -23,7 +23,9 @@ reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠️ works, with
 > waits for every coroutine to drain before the summary is taken, and it is therefore what makes the reported time, the
 > assertion totals, and the late failure/skip/incomplete/risky replays described here hold at all. Without it,
 > _PHPUnit_ prints its summary mid-run: the reported time can understate the truth by orders of magnitude, and
-> assertion totals are neither correct nor consistent between a full run and the same tests run in isolation. Read the
+> assertion totals are neither correct nor consistent between a full run and the same tests run in isolation. A run
+> that creates a coroutine without it registered says so once on STDERR (silenced by
+> _COUNIT_SILENCE_TEARDOWN_NOTICE=1_), so the divergence is announced rather than silent. Read the
 > ✅ entries below as "✅, with the extension registered".
 
 Rows are grouped by area — writing tests, fixtures and hooks, test doubles, outcomes and diagnostics, execution

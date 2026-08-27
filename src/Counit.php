@@ -185,6 +185,10 @@ class Counit
     public static function create(callable $callable, int $count = 0): int
     {
         if (Helper::isCoroutineFriendly()) {
+            // The first coroutine of the run is the point where an unregistered CounitExtension
+            // starts costing correctness; warn once. See CounitExtension::warnIfUnregistered().
+            CounitExtension::warnIfUnregistered();
+
             self::$lastCreateJoined   = false;
             self::$lastCreateFinished = false;
 
@@ -511,6 +515,9 @@ class Counit
         if (!Helper::isCoroutineFriendly()) {
             return $callable();
         }
+
+        // See create(): the same warn-once, for a run whose first coroutine is a joined one.
+        CounitExtension::warnIfUnregistered();
 
         // The nearest TestCase frame is the test being joined. It is not always the direct caller:
         // when create() delegates here for a manual-approach producer, the direct caller is that

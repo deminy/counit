@@ -34,10 +34,68 @@ use Swoole\Coroutine;
 class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeTestHook
 {
     /**
+     * Whether this extension's first hook has run -- i.e. whether it is registered in the run's
+     * configuration. PHPUnit calls the BeforeFirstTestHook of every registered extension before
+     * the first test, and no configuration shape can register the extension without it, so the
+     * flag is the exact answer to "are counit's corrections in play?".
+     *
+     * @var bool
+     */
+    private static $registered = false;
+
+    /**
+     * @var bool
+     */
+    private static $noticeIssued = false;
+
+    /**
+     * Announces -- once, to STDERR -- that this extension is NOT registered, so none of the
+     * corrections below are in play: nothing waits for the tests' coroutines, and PHPUnit prints
+     * its summary while tests are still sleeping. The failure mode is otherwise entirely silent,
+     * and the numbers it produces look plausible: the reported time can understate the truth by
+     * orders of magnitude, and assertion totals are neither correct nor consistent between a full
+     * run and the same tests run in isolation (see docs/compatibility.md, whose every guarantee
+     * assumes registration).
+     *
+     * Called from Counit::create()/createAndJoin() rather than from the runner script: the script
+     * hands control to PHPUnit and only gets it back after the run, and a suite that never creates
+     * a coroutine has nothing to correct in the first place -- so this is both the earliest and the
+     * narrowest seam. It still precedes every number the omission invalidates.
+     *
+     * Silenced by COUNIT_SILENCE_TEARDOWN_NOTICE=1, like the other counit notices, for a project
+     * that deliberately runs without it. The message quotes this line's registration element; the
+     * 1.x line quotes <bootstrap class="..."/> instead, since PHPUnit 10 removed the hook
+     * interfaces this class implements.
+     */
+    public static function warnIfUnregistered(): void
+    {
+        if (self::$registered || self::$noticeIssued) {
+            return;
+        }
+        self::$noticeIssued = true;
+
+        if (getenv('COUNIT_SILENCE_TEARDOWN_NOTICE') !== false) {
+            return;
+        }
+
+        fwrite(
+            STDERR,
+            sprintf(
+                'counit notice: PHPUnit extension %s is not registered, so nothing waits for the tests\' coroutines: the reported time and assertion totals will be wrong, and a failure/skip a test reaches after its first yield cannot be reported natively. Register it in your phpunit.xml: <extensions><extension class="%s"/></extensions>. Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.%s',
+                self::class,
+                self::class,
+                PHP_EOL
+            )
+        );
+    }
+
+    /**
      * {@inheritDoc}
      */
     public function executeBeforeFirstTest(): void
     {
+        self::$registered = true;
+
         // Segment accounting (see Attribution) relies on cooperative scheduling: a coroutine only
         // ever switches at a yield. Swoole's preemptive scheduler breaks that premise, so
         // attribution stays off under it and the JUnit per-testcase correction falls back to the

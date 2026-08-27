@@ -47,6 +47,36 @@ jobs:
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
           grep -qF 'OK (48 tests, 58 assertions)' /tmp/compatibility.log
 
+      - name: Test Unregistered-Extension Notice
+        # Running without <extension class="Deminy\Counit\CounitExtension"/> registered is a silent
+        # failure mode whose output looks plausible: nothing waits for the coroutines, so PHPUnit
+        # prints its summary mid-run -- the reported time understates the truth by orders of
+        # magnitude and the assertion totals are wrong (the very numbers the step above pins).
+        # counit therefore says so once, on STDERR, from the run's first coroutine. It must stay a
+        # notice: the run's own exit code is untouched. And it must not fire where nothing is
+        # broken -- with the extension registered, or without Swoole, where there are no coroutines
+        # to wait for in the first place.
+        run: |
+          rc=0
+          ./counit --no-configuration tests/regression/JunitCountTest.php > /tmp/notice.log 2> /tmp/notice.err || rc=$?
+          cat /tmp/notice.log /tmp/notice.err
+          test "$rc" -eq 0
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            # Once for the whole run, not once per test.
+            test "$(grep -cF 'CounitExtension is not registered' /tmp/notice.err)" -eq 1
+            # Silenceable like every other counit notice.
+            rc=0
+            COUNIT_SILENCE_TEARDOWN_NOTICE=1 ./counit --no-configuration tests/regression/JunitCountTest.php > /dev/null 2> /tmp/notice-silenced.err || rc=$?
+            test "$rc" -eq 0
+            ! grep -qF 'is not registered' /tmp/notice-silenced.err
+          else
+            ! grep -qF 'is not registered' /tmp/notice.err
+          fi
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/JunitCountTest.php > /dev/null 2> /tmp/notice-registered.err || rc=$?
+          test "$rc" -eq 0
+          ! grep -qF 'is not registered' /tmp/notice-registered.err
+
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot be made native (the
         # Throwable only exists after PHPUnit reported the test as passed), but it is now
