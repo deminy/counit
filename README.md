@@ -18,6 +18,7 @@ Table of Contents
    * [The Automatic Approach](#the-automatic-approach-recommended)
    * [The Manual Approach](#the-manual-approach)
    * [Comparisons](#comparisons)
+* [Compatibility with PHPUnit](#compatibility-with-phpunit)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
@@ -170,7 +171,7 @@ The total # of assertions reported at the end of a run matches _PHPUnit_ exactly
 JUnit XML report (`--log-junit`, the only _PHPUnit_ 8/9 output that shows per-test assertion counts) are corrected as
 well — exact whenever counit can observe the test's yields (sleep()/usleep() calls in a namespaced test class, and
 Counit::sleep()). An assertion performed after a yield counit cannot observe (e.g. hooked network IO) goes missing
-from its own test's JUnit count — but is never added to another test's. See [Additional Notes](#additional-notes).
+from its own test's JUnit count — but is never added to another test's. See [Compatibility with PHPUnit](docs/compatibility.md).
 
 To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.2.x/tests/unit/automatic) (test suite "automatic").
 
@@ -240,12 +241,12 @@ When another test declares _@depends_ on a manual-approach test, _Counit::create
 method — joins the coroutine instead of merely starting it: the callback runs to completion (other tests keep running
 in the meantime), so a value computed inside it can be returned from the test method and reaches the dependents for
 real. Alternatively, _Counit::createAndJoin()_ returns the callback's value (and rethrows its failure) directly. See
-[Additional Notes](#additional-notes).
+[Compatibility with PHPUnit](docs/compatibility.md).
 
 The same join applies to a test that has an exception expectation registered — _expectException()_ and friends,
 declared before the _Counit::create()_ call as usual: the callback's Throwable is rethrown synchronously into
 _PHPUnit_'s native verification, so an exception thrown only after a sleep/IO yield matches (or mismatches) exactly
-as under plain _PHPUnit_, with no test changes. See [Additional Notes](#additional-notes).
+as under plain _PHPUnit_, with no test changes. See [Compatibility with PHPUnit](docs/compatibility.md).
 
 To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) (test suite "manual").
 
@@ -320,6 +321,21 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
   </tr>
 </table>
 
+# Compatibility with PHPUnit
+
+_Counit_ is designed as a drop-in companion to _PHPUnit_, not a replacement. In short:
+
+* When the Swoole extension is not enabled, unit tests written for _PHPUnit_ and/or _counit_ run in _PHPUnit_ and/or
+  _counit_ in exactly the same way, without any changes: every _counit_ API falls back to plain blocking behavior.
+* Unit tests written for _counit_ run in _PHPUnit_ without any issue, **with or without** the Swoole extension
+  loaded: _counit_'s coroutine behavior activates only inside the coroutine scheduler that the _counit_ runner itself
+  starts, which plain _PHPUnit_ never does — a loaded-but-idle Swoole extension changes nothing.
+
+That leaves one combination to document: running tests **under the _counit_ runner with Swoole enabled** — the fast,
+concurrent mode this package exists for. **[docs/compatibility.md](docs/compatibility.md)** covers it in full: a matrix
+of compatible features, a matrix of incompatible ones (each with a _Counit 1.x_ reference column for the current
+_PHPUnit_ ~12.5.24/~13.0 line), and the per-feature notes behind every ⚠️/❌ entry.
+
 # Additional Notes
 
 Since this package allows running multiple tests simultaneously, we should not use same resources in different tests;
@@ -334,238 +350,10 @@ faster, with limitations apply. Here is a list of limitations of this package:
 * The package makes tests running faster by performing time/IO operations simultaneously. For functions/extensions that
   work in blocking mode only, this package can't make their function calls faster. Here are some extensions that work in
   blocking mode only: _MongoDB_, _Couchbase_, and some ODBC drivers.
-* The package doesn't work exactly the same as when running under _PHPUnit_:
-  * Tests may not have yet finished even it's marked as finished (by _PHPUnit_). Because of that, a test marked as "passed" (by PHPUnit) could still fail at a later time under _counit_. Because of this, the most reliable way to check if all test cases have passed or not is to check the exit code of _counit_.
-  * The total # of assertions reported at the end of a run matches _PHPUnit_, and the per-testcase `assertions` attributes in the JUnit XML report (`--log-junit`, the only _PHPUnit_ 8/9 output that shows per-test assertion counts) are corrected before the report is written: every assertion is attributed to the test that performed it (segment accounting over the coroutine switches counit can observe), so the counts match a blocking run exactly whenever every yield is observable. A yield counit cannot observe (hooked network IO, a fully-qualified `\sleep()` call, a test class in the global namespace) leaves that test's own count too low — never another test's too high. Internally, an assertion performed after a yield still lands in whichever test's counting window _PHPUnit_ happens to have open; only the XML report is corrected.
-  * Some exceptions/errors are not handled/reported the same.
-* Annotation _@doesNotPerformAssertions_ and method _expectNotToPerformAssertions()_ (when called in _setUp()_ or at
-  the top of the test body) are supported in both approaches: such tests report clean with zero assertions, same as
-  under _PHPUnit_. Remaining limitations, both consequences of the risky verdict being rendered when the test's
-  coroutine first yields:
-  * A test declaring it performs no assertions but nevertheless performing one only **after** a sleep/IO yield is
-    flagged risky through the deferred end-of-run pass described in the risky-check bullet below — provided its
-    yields are observable; one resumed at a point _counit_ cannot observe stays silent. Run totals stay exact
-    either way, and a *failing* late assertion still fails the run.
-  * In a mixed suite, delayed assertions from *other* tests may land in such a test's counting window and flag it
-    risky occasionally — the internal counting-window effect above (the corrected JUnit report is not affected by
-    it).
-  * Note a **class-level** _@doesNotPerformAssertions_ annotation is ignored by _PHPUnit_ 8/9 itself (only the
-    method-level annotation is honored), with or without _counit_.
-* The risky check "This test did not perform any assertions" works with near-exact _PHPUnit_ semantics. The check is
-  decided from the count _PHPUnit_ reads the moment _runBare()_ returns — under _counit_, the body's first yield —
-  and whether the still-running body will assert later is unknowable at that instant; that is why _counit_ credits
-  one assertion up front (suppressing FALSE risky verdicts for post-yield assertions), which used to also suppress
-  every TRUE one. Two mechanisms now restore the true verdicts:
-  * The credit is **declined whenever the body finished before its coroutine ever yielded** — the count is already
-    final, so _PHPUnit_ reaches the verdict natively, at the right moment, in both approaches.
-  * A yielding no-assertion test is reported at the **end of the run** by handing a `RiskyTestError` to the public
-    _TestResult::addFailure()_ — it appears in the risky listing with the test method's real location, counts into
-    `Risky: N`, and `--fail-on-risky` exits 1 exactly as in blocking mode. A test is only reported when _counit_
-    can *prove* its count: its coroutine must never have been resumed at a point _counit_ cannot observe (hooked
-    network/DB IO, a fully-qualified `\sleep()`, a test class in the global namespace — the same caveat documented
-    for the JUnit per-test counts), because such a test's own tally is an undercount and reporting it would be a
-    false accusation. Unprovable cases stay silent; tests _PHPUnit_ already flagged, tests that declared they
-    perform no assertions (those get the mirror "annotated but performed N assertions" check instead), and every
-    non-passing test — natively or only after its report — are exempt, mirroring _PHPUnit_ 8/9's own strict verdict
-    chain. The deferred verdicts sit at the end of the risky listing, a stray `R` progress character may trail the
-    progress line (the printer echoes late verdicts), and `--stop-on-risky` cannot react to them.
-    `--dont-report-useless-tests` disables all of it, as under _PHPUnit_.
-* Annotation _@depends_ (same-class, cross-class `Class::method`, and the `clone`/`shallowClone` options) works with
-  exact _PHPUnit_ semantics in both approaches. _PHPUnit_ records a test's return value and verdict when its
-  _runBare()_ returns — under _counit_, the coroutine's first yield: too early for either to be real. So when
-  anything in the run depends on a test (_counit_ builds the reverse dependency graph up front, from _PHPUnit_'s own
-  metadata), that test's coroutine is *joined*: it runs to true completion — _tearDown()_, error handling and all,
-  with native semantics — before the run moves on. Dependents therefore receive the actual return value and are
-  skipped when a producer fails (or turns out risky), even when that happens only after a yield. The joined producer
-  gets no speedup of its own — its dependents could never have overlapped with it anyway — while every unrelated
-  test still overlaps with it, including while it waits. Notes:
-  * In the manual approach, _Counit::create()_ performs the join by itself when called directly from a test method
-    something depends on, so the usual shape — compute into a by-ref variable inside the callback, return it from
-    the test method — just works. A producer can also call _Counit::createAndJoin()_ instead, which returns the
-    callback's value (and rethrows its failure) directly. No assertion credit is applied on the join path: the body
-    completes before _PHPUnit_ reads the count, so the real assertions are counted — and a producer performing none
-    stays risky, which is what makes _PHPUnit_ skip its dependents.
-  * The whole-class form (`@depends Class::class`) requires _PHPUnit_ >= 9.3; older versions (with or without
-    _counit_) warn that the target does not exist. A producer using a data provider passes _NULL_ to its
-    dependents — under plain _PHPUnit_ 8/9 too; upstream behavior, not a _counit_ limitation.
-* Method _expectException()_ and its friends work with exact _PHPUnit_ semantics even when the expected exception is
-  thrown only after the test's first sleep/IO yield. The automatic approach already verified a matching throw
-  natively — the whole _runBare()_ runs inside the coroutine — but its failing shapes surfaced only via the deferred
-  end-of-run block, the manual approach failed prematurely with "exception not thrown" plus a deferred duplicate,
-  and a warning/notice/deprecation expectation (_PHPUnit_ 9's _expectWarning()_ family, or
-  _expectException()_ with _PHPUnit_'s _Warning_ class) broke outright: _PHPUnit_'s converting error handler is
-  registered around _runBare()_ on the main coroutine and was already unregistered by the time the test's coroutine
-  resumed. _Counit::create()_ now checks for a registered expectation once the body reaches its first yield and
-  *joins* the coroutine — the same mechanism as for a _@depends_ producer: _PHPUnit_ keeps waiting (error handler
-  still registered), the real Throwable is rethrown synchronously into its native verification, and match, mismatch,
-  and never-thrown all report exactly as in blocking mode, in both approaches. No assertion credit is applied on the
-  join path (the verification counts its own assertions), and only expectation-carrying tests that yield lose their
-  own concurrency. An expectation declared only **after** the test's first yield is invisible at the join decision
-  and keeps the old behavior — declare expectations before the first sleep/IO call.
-* The timing of _tearDown()_ differs between the two approaches:
-  * **The automatic approach** runs the whole test lifecycle — _setUp()_, the test method, and _tearDown()_ — inside
-    one coroutine, so _tearDown()_ always observes a finished test body, exactly as under plain _PHPUnit_.
-  * **The manual approach** leaves the lifecycle to _PHPUnit_: _tearDown()_ runs as soon as the callback passed to
-    _Counit::create()_ first yields on a sleep/IO call — possibly while that callback is still running. Put
-    order-sensitive cleanup inside a `try { ... } finally { ... }` block within the callback instead of in
-    _tearDown()_.
-* A _markTestSkipped()_ or _markTestIncomplete()_ call made after the test's first sleep/IO yield works with exact
-  _PHPUnit_ semantics for the run-level surfaces, in both approaches (both share the divergence: the skip Throwable
-  propagates out of `runBare()` into _counit_'s already-returned branch regardless of which side of `runBare()` the
-  coroutine wraps). The verdict cannot be made native — the Throwable is thrown mid-body, so unlike an exception or
-  output expectation there is nothing registered at the first yield for a join decision to detect, and _PHPUnit_
-  has already reported the test as passed. _counit_ therefore replays each such verdict into the run's
-  `TestResult` through the public `addError()` — which classifies `SkippedTest`/`IncompleteTest` Throwables
-  natively — once every coroutine has drained: the `Skipped:`/`Incomplete:` summary counts, the listings and the
-  `--fail-on-skipped`/`--fail-on-incomplete` exit codes (_PHPUnit_ 9; the flags do not exist on _PHPUnit_ 8) match
-  a blocking run exactly. Notes:
-  * The test's recorded status stays "passed" (the run already moved past it): the JUnit XML report and the result
-    cache still record a pass, and `--stop-on-*` cannot react to a verdict learned once the run has finished. A
-    skip issued before the first yield remains fully native.
-  * _PHPUnit_'s printer writes a progress symbol per late record, so stray `S`/`I` characters trail the progress
-    line — the same cosmetic as the deferred risky verdicts' stray `R`.
-  * Should a replay ever fail, the affected tests are listed in a STDERR notice instead — degraded, never a wrong
-    count.
-* Diagnostics (deprecations/warnings/notices) triggered after a test's first sleep/IO yield are converted again.
-  _PHPUnit_ 8/9 convert them into exceptions thrown at the call site, through an error handler that
-  `TestResult::run()` registers **outside** `runBare()` — so the "whole `runBare()` runs inside the coroutine"
-  property does not reach it, and a post-yield convertible diagnostic used to hit no handler at all, in **both**
-  approaches: the test silently passed (exit code 0) where blocking mode errors it (exit code 2). _counit_ now
-  registers a delegating handler of its own for exactly the windows _PHPUnit_'s cannot cover — while the coroutine
-  _PHPUnit_ runs on is suspended, which is the only time test coroutines can run — and hands every diagnostic to
-  _PHPUnit_'s own converting handler (the run's `convert*ToExceptions` settings, `@`-suppression semantics and
-  exception classes all stay _PHPUnit_'s own): the exact `Error\*` exception is thrown at the trigger site, the body
-  aborts, and the verdict lands in the deferred end-of-run failure block with exit code 1 — blocking errors the
-  test natively with exit code 2, this branch's standard post-yield reporting model. Notes:
-  * The handler is deliberately not left registered permanently: _PHPUnit_ 8/9's own handler registration gives up
-    when any handler is already on the stack, so a permanent one would silently disable conversion for every
-    following test. It is armed only across the main coroutine's own yields, all of which _counit_ controls.
-  * A diagnostic triggered before the first yield converts natively in both modes, and a `@`-suppressed one stays
-    suppressed; a run with every `convert*ToExceptions` setting off converts nothing, exactly as blocking.
-* Option `--enforce-time-limit` (with `--default-time-limit` and the `@small`/`@medium`/`@large` size annotations)
-  works with exact _PHPUnit_ semantics — at the price of the run's concurrency. _PHPUnit_ 8/9 time a limited test by
-  wrapping the whole _runBare()_ call in a `pcntl_alarm()`/`SIGALRM` guard (package _phpunit/php-invoker_) and disarm
-  the alarm the moment _runBare()_ returns. Under _counit_ that used to be the body's first yield: the measured window
-  covered milliseconds, so an over-limit test simply passed — and on the joined paths (a _@depends_ producer, an
-  _expectException()_ test), where _runBare()_ does stay alive for the test's real duration, the still-armed alarm's
-  signal was delivered to whichever coroutine resumed first, aborting an unrelated test and failing a green run
-  non-deterministically. So while the option is active, _counit_ joins **every** test's coroutine at its first yield
-  (the same mechanism as for a _@depends_ producer): _PHPUnit_'s own timer measures the real duration and reports a
-  timeout natively — a risky verdict carrying the "Execution aborted after N seconds" message, `--fail-on-risky`
-  honored — and, with no concurrent test coroutines left, the alarm can only ever fire within the timed test's own
-  window. Notes:
-  * The whole run is serialized while the option is active: with it, _counit_ gives _PHPUnit_'s timings and
-    _PHPUnit_'s speed — the option and _counit_'s concurrency are mutually exclusive by construction (per-test wall
-    time is not a meaningful quantity while tests deliberately overlap). A notice on STDERR announces this; silence
-    it with _COUNIT_SILENCE_TEARDOWN_NOTICE=1_.
-  * No up-front assertion credit is applied on the joined path, so an aborted test that reached no assertion is
-    flagged "did not perform any assertions" exactly as in blocking mode — _PHPUnit_ 8/9 count such a test's abort
-    and its missing assertions as two risky entries.
-  * Enforcement needs the `pcntl` extension in both modes — plain _PHPUnit_ silently skips enforcement without it
-    (the mechanism is POSIX-only) — and _counit_ then skips the joining too, keeping full concurrency. The Docker
-    images used for local development install `pcntl` so the time-limit regression tests can run there.
-  * At the exact boundary — a `sleep(N)` under an N-second limit — _counit_ is marginally more lenient than
-    blocking _PHPUnit_: a hooked sleep is not interrupted by `SIGALRM` the way blocking `sleep()` is (the timeout
-    is only thrown once the sleep completes and the coroutine resumes), so a test at exactly its limit can pass
-    under _counit_ where blocking mode — itself flaky at the boundary — sometimes aborts it. Choose limits with
-    margin.
-  * A test body that never yields was timed exactly even before this fix, and still is: the alarm dispatches on the
-    running code just as under plain _PHPUnit_.
-* Annotations `@backupGlobals` and `@backupStaticAttributes` (and the matching
-  `backupGlobals`/`backupStaticAttributes` configuration, the exclude lists, and `--strict-global-state`) work with
-  exact _PHPUnit_ semantics — at the price of the backed-up test's concurrency. _PHPUnit_ 8/9 snapshot global state
-  as (nearly) the first statement of _runBare()_ and restore as (nearly) the last. In the automatic approach the
-  whole _runBare()_ runs inside the test's coroutine, so the backed-up test's own isolation was already correct —
-  but the snapshot window spanned the test's entire concurrent lifetime, and the restore silently reverted every
-  overlapping test's global writes (the restorer unsets every key absent from the snapshot). In the manual approach
-  — whose _runBare()_ is _PHPUnit_'s own, running on the main coroutine — the restore additionally fired at the
-  body's first yield: the body's own pre-yield writes were reverted mid-test and its post-yield writes leaked. An
-  `@backupStaticAttributes` snapshot also captured _counit_'s **own** static bookkeeping (counit's classes are
-  user-defined, so not on _PHPUnit_'s exclude list), skewing the run's reported assertion total. The fix has two
-  halves, because global state — unlike a return value, an exception or an alarm — is process-wide: the backed-up
-  test is *joined* (the `@depends`-producer mechanism, with no up-front assertion credit), and before its snapshot
-  is taken every in-flight test coroutine is *drained* — giving the snapshot/restore pair the exclusive window
-  blocking _PHPUnit_ gets for free. With that exclusive window the statics rewind becomes self-healing: everything
-  _counit_ mutates inside the window belongs to the joined test itself. Notes:
-  * A backed-up test first waits for everything already in flight, then runs serialized; every other test still
-    overlaps normally, and a suite with no backup requests is completely unaffected. A run-wide
-    `backupGlobals="true"` / `--globals-backup` (or the static-attributes equivalent) serializes the whole run.
-  * `--strict-global-state` becomes correct as a side effect: both of its comparison snapshots bracket the same
-    exclusive window, so its diff shows the test's real mutations — post-yield writes included — and nothing from
-    bystanders.
-  * A process-isolated test needs none of this and never did: isolation skips the snapshot machinery entirely (the
-    child process's mutations die with it).
-* Method _assertPostConditions()_ and `@postCondition`-annotated hook methods (the annotation exists as of _PHPUnit_
-  9.1) work with exact _PHPUnit_ semantics.
-  _PHPUnit_ 8/9 run the post-condition phase from _runBare()_, immediately after the test method invocation returns.
-  In the automatic approach this was always correct — the whole _runBare()_ runs inside the test's coroutine, so the
-  phase follows the truly finished body, with full concurrency kept. In the manual approach — whose _runBare()_ is
-  _PHPUnit_'s own, running on the main coroutine — the phase used to fire at the body's first yield: the hooks
-  inspected the test while its body was still in flight (failing loudly, or passing vacuously against pre-body
-  state), and they ran even for a body that failed only after a yield, where blocking _PHPUnit_ skips the phase
-  entirely. So _Counit::create()_ now detects — by reflection, per class — a caller whose class customizes the phase
-  (an overridden _assertPostConditions()_, in a parent class too, or any `@postCondition` method) and *joins* its
-  coroutine, the `@depends`-producer mechanism: the phase follows the real body, is skipped when the body failed,
-  and a throwing hook fails/errors the test natively. Notes:
-  * Only the customizing class's manual-approach tests lose their own concurrency; every other test still overlaps
-    with them, including while they wait. A class customizing nothing — the overwhelming majority — is completely
-    unaffected, and automatic-approach tests are never joined for this (they need no fix).
-  * As on every join path, no assertion credit is applied: a customizing test performing no assertions is flagged
-    risky, exactly as under blocking _PHPUnit_.
-  * _assertPreConditions()_ / `@preCondition` methods need no handling in either approach: _PHPUnit_ invokes them
-    right before the test method, inside the same coroutine (automatic) or before the body's first yield (manual).
-  * The detection is caller-based like the _expectException()_ one: a _Counit::create()_ call made from a helper
-    object rather than the test method itself is not joined.
-* Methods _expectOutputString()_ and _expectOutputRegex()_ work with exact _PHPUnit_ semantics. The root cause here
-  is visibility, not timing: Swoole gives every coroutine its **own** output-buffer stack (a coroutine starts at
-  `ob_get_level() === 0` no matter what its creator had open). In the automatic approach that is exactly why
-  everything already worked: the whole _runBare()_ — _PHPUnit_'s own `ob_start()` and output verification
-  included — runs inside the test's coroutine, whose private buffer survives its yields, so expectations verify
-  against the real, complete output with **full concurrency kept**. In the manual approach — whose _runBare()_ is
-  _PHPUnit_'s own, running on the main coroutine — the callable's echo, running inside the spawned coroutine,
-  never reached _PHPUnit_'s buffer at all: expectations compared against an empty string unconditionally (a yield
-  was not even needed) and the output leaked raw into the progress output. _Counit::create()_ therefore
-  **captures** the coroutine's output in a buffer of its own, **joins** a test with a registered expectation at
-  its first yield (detected through the public _hasExpectationOnOutput()_ — no reflection involved; like an
-  exception expectation, it is declared inside the body), and **replays** the captured bytes on the calling
-  coroutine, inside _PHPUnit_'s still-open buffer: match, mismatch and never-printed all report natively, with
-  the real actual output in the diff. Notes:
-  * Only manual-approach output-expecting tests that yield lose their own concurrency; every other test still
-    overlaps with them. Automatic-approach tests are never joined for this — they need no fix.
-  * An expectation must be registered before the callable's first yield; one only reached after it is invisible
-    at the join decision and keeps the old behavior.
-  * A body that leaves its own `ob_start()` open has the level mismatch reproduced on the main coroutine, so
-    _PHPUnit_ itself reports the native "did not (only) close its own output buffers" risky verdict — for joined
-    tests.
-  * Post-yield output of a manual-approach test that is never joined reaches the terminal in one contiguous
-    batch at body end — where it already went before this fix, just no longer interleaved. The "test printed
-    unexpected output" check (`--disallow-test-output`) remains unsupported on this branch for post-yield output
-    in both approaches (in the automatic approach such stray output is swallowed by the coroutine-local buffer);
-    the check itself runs outside _runBare()_, too early under _counit_.
-* Mock `->expects(...)` expectations work in both approaches, in both directions — satisfied or violated only after
-  the test's first sleep/IO yield. _PHPUnit_ 8/9 verify **every** registered mock from _runBare()_, right after the
-  test method returns — and the verification is not read-only: `__phpunit_verify()` also resets each mock (the
-  matcher gate only controls the per-mock assertion count). In the automatic approach that was never a problem: the
-  whole _runBare()_, verification included, runs inside the test's coroutine, so verdicts always cover the finished
-  body — a violation after a yield lands in the deferred end-of-run block with exit code 1, this branch's usual
-  post-yield failure model. In the manual approach — whose _runBare()_ is _PHPUnit_'s own, running on the main
-  coroutine — the verification used to fire at the callable's first yield: an expectation satisfied only later
-  failed prematurely, a satisfied mock was stripped so a later `never()` violation (or exceeded count) passed
-  silently with exit code 0, and even a matcher-less _createMock()_/_createStub()_ used as a plain stub lost its
-  `willReturn()` configuration mid-body (post-yield stubbed calls returned null). _Counit::create()_ now joins a
-  manual-approach test that has **any** registered mock at its first yield — deliberately wider than the 1.x
-  branch's invocation-count-rule gate, mirroring _PHPUnit_ 8/9's verify-everything loop — so the native
-  verification covers the truly finished body. Notes:
-  * Only manual-approach tests that registered a test double lose their own concurrency; every other test still
-    overlaps with them. Automatic-approach tests are never joined for this — they need no fix.
-  * A mock created only **after** the callable's first yield is invisible at the join decision and is never
-    verified at all (the usual declared-after-yield carve-out); create and configure mocks before the first
-    sleep/IO call.
-  * The detection reads _PHPUnit_'s internal mock registry (one private property, of the same name and shape on
-    _PHPUnit_ 8.0 through 9.6); should a future release change it, _counit_ prints a notice once and degrades to
-    the previous behavior — loud, never silent.
-* Option `--repeat` runs in blocking mode: repeated passes reuse the very same test objects, which cannot overlap
-  with coroutines. The run behaves exactly as under plain _PHPUnit_ — correct, but without any speedup.
+* The package doesn't work exactly the same as when running under _PHPUnit_ — see
+  [Compatibility with PHPUnit](docs/compatibility.md) for the two feature matrices and the per-feature details. The
+  one rule to remember: a test _PHPUnit_ has already marked "passed" can still fail later under _counit_, so the exit
+  code of the run — not the summary line alone — is the authoritative pass/fail signal.
 
 # Local Development
 
