@@ -614,7 +614,10 @@ jobs:
           ! grep -qF 'Fatal error' /tmp/diag-ue.err
           ! grep -qF 'already been reported as passed' /tmp/diag-ue.err
           test "$rc" -eq 2
-          grep -qF 'Tests: 1, Assertions: 0, Errors: 2, Deprecations: 1.' /tmp/diag-ue.log
+          # PHP 8.4 deprecated passing E_USER_ERROR to trigger_error(), so the fixture's own
+          # call adds a deprecation there and on 8.5, but not on the 8.3 leg -- the error count
+          # is what this pins either way.
+          grep -qE 'Tests: 1, Assertions: 0, Errors: 2(, Deprecations: 1)?\.' /tmp/diag-ue.log
           grep -qF 'E_USER_ERROR was triggered' /tmp/diag-ue.log
 
       - name: Test JUnit XML Assertion Counts
