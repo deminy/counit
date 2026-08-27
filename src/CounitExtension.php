@@ -54,6 +54,16 @@ use Swoole\Coroutine;
 final class CounitExtension implements Extension
 {
     /**
+     * Whether bootstrap() has run -- i.e. whether this extension is registered in the run's
+     * configuration. PHPUnit calls bootstrap() once per registered extension, before the first
+     * test, so nothing else can set it and no configuration shape can register the extension
+     * without it: the flag is the exact answer to "are counit's corrections in play?".
+     */
+    private static bool $bootstrapped = false;
+
+    private static bool $noticeIssued = false;
+
+    /**
      * Shared body of the four verdict subscribers registered in bootstrap(): forwards the test's
      * class to TestCase::handleAbortedTestPreparation(), which no-ops unless the test was aborted
      * during preparation and its class has taken-over after-test hooks.
@@ -65,9 +75,51 @@ final class CounitExtension implements Extension
         }
     }
 
+    /**
+     * Announces -- once, to STDERR -- that this extension is NOT registered, so none of the
+     * corrections below are in play: nothing waits for the tests' coroutines, and PHPUnit prints
+     * its summary while tests are still sleeping. The failure mode is otherwise entirely silent,
+     * and the numbers it produces look plausible: the reported time can understate the truth by
+     * orders of magnitude, and assertion totals are neither correct nor consistent between a full
+     * run and the same tests run in isolation (see docs/compatibility.md, whose every guarantee
+     * assumes registration).
+     *
+     * Called from Counit::create()/createAndJoin() rather than from the runner script: the script
+     * hands control to PHPUnit and only gets it back after the run, and a suite that never creates
+     * a coroutine has nothing to correct in the first place -- so this is both the earliest and the
+     * narrowest seam. It still precedes every number the omission invalidates.
+     *
+     * Silenced by COUNIT_SILENCE_TEARDOWN_NOTICE=1, like the other counit notices, for a project
+     * that deliberately runs without it. The message quotes this line's registration element; a
+     * back-port to 0.x has to quote <extension class="..."/> instead.
+     */
+    public static function warnIfUnregistered(): void
+    {
+        if (self::$bootstrapped || self::$noticeIssued) {
+            return;
+        }
+        self::$noticeIssued = true;
+
+        if (getenv('COUNIT_SILENCE_TEARDOWN_NOTICE') !== false) {
+            return;
+        }
+
+        fwrite(
+            STDERR,
+            sprintf(
+                'counit notice: PHPUnit extension %s is not registered, so nothing waits for the tests\' coroutines: the reported time and assertion totals will be wrong, and a failure/skip a test reaches after its first yield cannot be reported natively. Register it in your phpunit.xml: <extensions><bootstrap class="%s"/></extensions>. Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.%s',
+                self::class,
+                self::class,
+                PHP_EOL
+            )
+        );
+    }
+
     #[\Override]
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
+        self::$bootstrapped = true;
+
         // This is the same Configuration instance TestRunner reads its time-limit settings from
         // (and TestBuilder its backup defaults), handed over through the sanctioned extension
         // seam -- no reflection into PHPUnit's @internal configuration Registry needed.

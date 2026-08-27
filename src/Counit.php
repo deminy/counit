@@ -156,6 +156,10 @@ class Counit
     public static function create(callable $callable, int $count = 0, ?callable $onJoin = null): int
     {
         if (Helper::isCoroutineFriendly()) {
+            // The first coroutine of the run is the point where an unregistered CounitExtension
+            // starts costing correctness; warn once. See CounitExtension::warnIfUnregistered().
+            CounitExtension::warnIfUnregistered();
+
             $trace  = debug_backtrace();
             $caller = $trace[1]['object'] ?? null;
 
@@ -576,6 +580,9 @@ class Counit
         if (!Helper::isCoroutineFriendly()) {
             return $callable();
         }
+
+        // See create(): the same warn-once, for a run whose first coroutine is a joined one.
+        CounitExtension::warnIfUnregistered();
 
         $trace  = debug_backtrace();
         $caller = $trace[1]['object'] ?? null;

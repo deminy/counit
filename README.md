@@ -133,6 +133,14 @@ For _PHPUnit_ 8 and 9 (counit ^0.3), where the class implements the older hook i
 </extensions>
 ```
 
+A run that creates its first coroutine without the extension registered says so once on STDERR, so the failure mode
+below is not a silent one:
+
+```
+counit notice: PHPUnit extension Deminy\Counit\CounitExtension is not registered, so nothing waits for the tests'
+coroutines: [...]. Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.
+```
+
 ### What goes wrong without it
 
 * **The reported time is not the real time.** A test's coroutine returns to _PHPUnit_ at its first yield, so _PHPUnit_
