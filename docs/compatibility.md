@@ -11,7 +11,7 @@ _Counit_ is designed as a drop-in companion to _PHPUnit_, not a replacement. In 
   starts, which plain _PHPUnit_ never does — a loaded-but-idle Swoole extension changes nothing.
 
 The two matrices below therefore describe the one remaining combination: running tests **under the _counit_ runner
-with Swoole enabled** — the fast, concurrent mode this package exists for. This is the 0.2.x line, so the _Counit
+with Swoole enabled** — the fast, concurrent mode this package exists for. This is the 0.x line, so the _Counit
 0.x_ column describes the branch you are on; the _Counit 1.x_ column (the current line, for _PHPUnit_
 ~12.5.24/~13.0, which uses attributes instead of annotations and a different internal architecture) is included for
 reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠️ works, with documented differences;
@@ -76,7 +76,7 @@ so the entries a typical suite depends on come first.
 ## Feature notes
 
 What every ⚠️/❌ entry above means in practice on this branch — and the caveats behind some of the ✅ ones. The
-details below describe the 0.2.x implementation; the _Counit 1.x_ cells of the matrices summarize how the current
+details below describe the 0.x implementation; the _Counit 1.x_ cells of the matrices summarize how the current
 line differs.
 
 * Ways in which a _counit_ run does not behave exactly like a _PHPUnit_ run:

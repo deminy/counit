@@ -105,16 +105,16 @@ updates only; new work happens in the ~1.0.0 series.
 # Use "counit" in Your Project
 
 * Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests using one of the following two approaches (details will be discussed in the next sections):
-  * **The automatic approach (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/0.2.x/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class; every test method is then wrapped in a coroutine automatically.
-  * **The manual approach**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/0.2.x/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/0.2.x/src/Counit.php) instead of the PHP function _sleep()_.
+  * **The automatic approach (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/0.x/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class; every test method is then wrapped in a coroutine automatically.
+  * **The manual approach**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php) instead of the PHP function _sleep()_.
 * Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
 * Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
 * Optional steps:
-  * use PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/0.2.x/src/CounitExtension.php) as shown in file [phpunit.xml.dist](https://github.com/deminy/counit/blob/0.2.x/phpunit.xml.dist). This is to wait the whole test suite to finish before printing out the summary information at the end.
+  * use PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/0.x/src/CounitExtension.php) as shown in file [phpunit.xml.dist](https://github.com/deminy/counit/blob/0.x/phpunit.xml.dist). This is to wait the whole test suite to finish before printing out the summary information at the end.
 
 # Examples
 
-Folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.2.x/tests/unit/automatic) and [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) contain some sample tests, where we
+Folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.x/tests/unit/automatic) and [./tests/unit/manual](https://github.com/deminy/counit/tree/0.x/tests/unit/manual) contain some sample tests, where we
 have following time-related tests included:
 
 * Test slow HTTP requests.
@@ -173,7 +173,7 @@ well — exact whenever counit can observe the test's yields (sleep()/usleep() c
 Counit::sleep()). An assertion performed after a yield counit cannot observe (e.g. hooked network IO) goes missing
 from its own test's JUnit count — but is never added to another test's. See [Compatibility with PHPUnit](docs/compatibility.md).
 
-To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.2.x/tests/unit/automatic) (test suite "automatic").
+To find more tests written using this approach, please check tests under folder [./tests/unit/automatic](https://github.com/deminy/counit/tree/0.x/tests/unit/automatic) (test suite "automatic").
 
 <a id="the-case-by-case-style"></a>
 ## The Manual Approach
@@ -248,7 +248,7 @@ declared before the _Counit::create()_ call as usual: the callback's Throwable i
 _PHPUnit_'s native verification, so an exception thrown only after a sleep/IO yield matches (or mismatches) exactly
 as under plain _PHPUnit_, with no test changes. See [Compatibility with PHPUnit](docs/compatibility.md).
 
-To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.2.x/tests/unit/manual) (test suite "manual").
+To find more tests written using this approach, please check tests under folder [./tests/unit/manual](https://github.com/deminy/counit/tree/0.x/tests/unit/manual) (test suite "manual").
 
 ## Comparisons
 
