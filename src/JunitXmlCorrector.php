@@ -95,22 +95,96 @@ class JunitXmlCorrector
                 $correction[0]->setAttribute('assertions', (string) $correction[1]);
             }
 
-            // Recompute every testsuite aggregate from its (now corrected) descendant testcases.
-            foreach ($document->getElementsByTagName('testsuite') as $testSuite) {
-                if (!$testSuite->hasAttribute('assertions')) {
-                    continue;
-                }
+            self::writeDeferredVerdicts($document);
 
-                $total = 0;
-                foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
-                    if ($testCase->hasAttribute('assertions')) {
-                        $total += (int) $testCase->getAttribute('assertions');
+            // Recompute every testsuite aggregate from its (now corrected) descendant testcases.
+            // The failures/errors/skipped aggregates count the verdict elements just written
+            // (and PHPUnit's own), so the report's counters match its contents.
+            foreach ($document->getElementsByTagName('testsuite') as $testSuite) {
+                foreach (['assertions' => null, 'failures' => 'failure', 'errors' => 'error', 'skipped' => 'skipped'] as $attribute => $verdictElement) {
+                    if (!$testSuite->hasAttribute($attribute)) {
+                        continue;
                     }
+
+                    $total = 0;
+                    foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
+                        if ($verdictElement === null) {
+                            if ($testCase->hasAttribute('assertions')) {
+                                $total += (int) $testCase->getAttribute('assertions');
+                            }
+                        } elseif ($testCase->getElementsByTagName($verdictElement)->length > 0) {
+                            $total++;
+                        }
+                    }
+                    $testSuite->setAttribute($attribute, (string) $total);
                 }
-                $testSuite->setAttribute('assertions', (string) $total);
             }
         } catch (\Throwable $e) {
             // PHPUnit's internals have changed; leave the report as PHPUnit produced it.
+        }
+    }
+
+    /**
+     * Writes the deferred post-yield verdicts into the report: a <failure>/<error> element for
+     * every deferred failure (in the exact shape the JUnit logger's own doAddFault() writes,
+     * type attribute and description-plus-stack-trace text included) and a <skipped/> element
+     * for every deferred skip/incomplete -- the logger writes <skipped/> for incomplete tests
+     * too. The logger's own listener callbacks no-op for a late verdict (its currentTestCase is
+     * null once the run has moved past the test), so without this a test that failed or skipped
+     * only after its first yield stayed "passed" in the surface CI systems actually parse, while
+     * the run itself exited non-zero. Elements are matched by class and name exactly like the
+     * assertion-count correction above; a verdict whose element cannot be found (or which
+     * already carries one) is skipped.
+     *
+     * @param \DOMDocument $document
+     */
+    private static function writeDeferredVerdicts($document): void
+    {
+        if (Counit::$verdictsForReport === []) {
+            return;
+        }
+
+        // Class name -> test name -> the verdicts recorded for it, in order.
+        $byClassAndName = [];
+        foreach (Counit::$verdictsForReport as $verdict) {
+            $test = $verdict['test'];
+
+            $byClassAndName[get_class($test)][$test->getName(true)][] = $verdict['throwable'];
+        }
+
+        foreach ($document->getElementsByTagName('testcase') as $testCase) {
+            $className = $testCase->getAttribute('class');
+            $name      = $testCase->getAttribute('name');
+            if (empty($byClassAndName[$className][$name])) {
+                continue;
+            }
+
+            $throwable = array_shift($byClassAndName[$className][$name]);
+
+            if ($testCase->getElementsByTagName('failure')->length > 0
+                || $testCase->getElementsByTagName('error')->length > 0
+                || $testCase->getElementsByTagName('skipped')->length > 0) {
+                continue; // Already carries a verdict.
+            }
+
+            if (($throwable instanceof \PHPUnit\Framework\SkippedTest) || ($throwable instanceof \PHPUnit\Framework\IncompleteTest)) {
+                $testCase->appendChild($document->createElement('skipped'));
+
+                continue;
+            }
+
+            // Mirrors the JUnit logger's doAddFault(): failure for an assertion-level
+            // Throwable, error otherwise, with the same element text.
+            $type   = $throwable instanceof \PHPUnit\Framework\AssertionFailedError ? 'failure' : 'error';
+            $buffer = sprintf('%s::%s', $className, $name) . "\n";
+            $buffer .= trim(
+                \PHPUnit\Framework\TestFailure::exceptionToString($throwable) . "\n"
+                . \PHPUnit\Util\Filter::getFilteredStacktrace($throwable)
+            );
+
+            $fault = $document->createElement($type, \PHPUnit\Util\Xml::prepareString($buffer));
+            $fault->setAttribute('type', get_class($throwable));
+            $testCase->appendChild($fault);
         }
     }
 

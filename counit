@@ -133,10 +133,14 @@ if (extension_loaded('swoole') && !$repeatRequested) {
     // so other tests can run concurrently while it's sleeping/waiting on IO. If that coroutine's
     // assertion/exception happens *after* it had already yielded once (e.g. after a sleep()
     // call), create() had already returned to its caller by then, so PHPUnit reported the test as
-    // passed before the failure actually happened; see Counit::$deferredFailures. Check for that
-    // here, once we're back in normal (non-coroutine) PHP -- calling exit() from inside a
-    // coroutine gets intercepted by Swoole itself and can't reliably override PHPUnit's own exit
-    // code -- and force the run to fail instead of letting that false "pass" stand uncorrected.
+    // passed before the failure actually happened. Such a failure is normally replayed into the
+    // run's TestResult through the public addFailure()/addError() once every coroutine has
+    // drained (see CounitExtension::executeAfterLastTest()) -- native summary, listing and exit
+    // code -- which removes it from this list. Anything still here could not be recorded
+    // natively; print it, and make sure the run fails, once we're back in normal (non-coroutine)
+    // PHP -- calling exit() from inside a coroutine gets intercepted by Swoole itself and can't
+    // reliably override PHPUnit's own exit code. Never lower a native failure exit code (e.g. 2
+    // for errors) back to 1.
     $deferredFailureForcedExit = !empty(Deminy\Counit\Counit::$deferredFailures);
     if ($deferredFailureForcedExit) {
         fwrite(STDERR, PHP_EOL . 'The following failures happened after their test had already been reported as passed' . PHP_EOL . '(the assertion/exception occurred after a sleep()/IO yield point):' . PHP_EOL . PHP_EOL);
@@ -144,7 +148,9 @@ if (extension_loaded('swoole') && !$repeatRequested) {
             fwrite(STDERR, sprintf('- %s: %s%s', $testDescription, $throwable->getMessage(), PHP_EOL));
         }
         fwrite(STDERR, PHP_EOL);
-        $code = 1;
+        if ($code === 0) {
+            $code = 1;
+        }
     }
 
     // A markTestSkipped()/markTestIncomplete() call made after the test's first yield is

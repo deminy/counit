@@ -80,27 +80,51 @@ jobs:
             rc=0; ./counit -c phpunit.xml.dist --fail-on-incomplete tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
           fi
 
-      - name: Test Deferred-Failure Exit Code
-        # counit's core guarantee: a failure after the test's first yield can only surface
-        # through the deferred end-of-run block, and that block MUST force exit code 1 -- the
-        # exit code is the authoritative pass/fail signal precisely because the summary line
-        # still reads OK. The guarantee once silently broke when the warnings-only exit-code
-        # alignment was added after the deferred check (the TestResult reads all-successful for
-        # a deferred-only failure, so the alignment flipped the forced 1 back to 0); this step
-        # pins it per mode: a native failure in blocking mode, the deferred block plus exit 1
-        # under Swoole.
+      - name: Test Late Failure/Error Handling
+        # A failure or error that happens only after the test's first yield -- a body
+        # assertion/exception, or a tearDown() throw from the in-coroutine runBare() -- used to
+        # surface only in counit's end-of-run STDERR block with a forced exit code 1, while
+        # PHPUnit itself reported OK. The verdicts are now replayed into the run's TestResult
+        # through the public addFailure()/addError() once every coroutine has drained (see
+        # CounitExtension): summary counts, listings, exit codes and the JUnit report match
+        # blocking mode exactly, so the expected output is identical with and without Swoole and
+        # the old block must be absent. The data-set target pins the identity handling; the
+        # JUnit leg pins the corrector-written <failure>/<error> elements and the recomputed
+        # aggregates. (The forced exit code remains as the fail-soft path for verdicts that
+        # cannot be replayed, and still never turns a green exit code into a failing run's 0.)
         run: |
+          for target in LateFailureTest LateFailureManualTest TearDownErrorTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/late-fail.log 2> /tmp/late-fail.err || rc=$?
+            cat /tmp/late-fail.log /tmp/late-fail.err
+            ! grep -qF 'already been reported as passed' /tmp/late-fail.err
+            case "$target" in
+              LateFailureTest)       test "$rc" -eq 2
+                                     grep -qF 'Tests: 5, Assertions: 8, Errors: 1, Failures: 2.' /tmp/late-fail.log
+                                     grep -qF 'with data set "failing set"' /tmp/late-fail.log ;;
+              LateFailureManualTest) test "$rc" -eq 1
+                                     grep -qF 'Tests: 2, Assertions: 3, Failures: 1.' /tmp/late-fail.log ;;
+              TearDownErrorTest)     test "$rc" -eq 2
+                                     grep -qF 'Tests: 2, Assertions: 2, Errors: 1.' /tmp/late-fail.log
+                                     grep -qF 'deliberate tearDown() error' /tmp/late-fail.log ;;
+            esac
+          done
+          # The JUnit report carries the verdicts: real <failure>/<error> elements with matching
+          # testsuite aggregates, identical with and without Swoole.
           rc=0
-          ./counit -c phpunit.xml.dist tests/regression/LateFailureTest.php > /tmp/late-fail.log 2> /tmp/late-fail.err || rc=$?
-          cat /tmp/late-fail.log /tmp/late-fail.err
-          test "$rc" -eq 1
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'OK (1 test, 1 assertion)' /tmp/late-fail.log
-            grep -qF 'already been reported as passed' /tmp/late-fail.err
-            grep -qF 'deliberate failure after the first yield' /tmp/late-fail.err
-          else
-            grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/late-fail.log
-          fi
+          ./counit -c phpunit.xml.dist --log-junit /tmp/late-fail.xml tests/regression/LateFailureTest.php > /dev/null 2>&1 || rc=$?
+          test "$rc" -eq 2
+          php -r '
+              $d = new DOMDocument();
+              $top = $d->load("/tmp/late-fail.xml") ? $d->getElementsByTagName("testsuite")->item(0) : null;
+              exit((int) !(
+                  $top !== null
+                  && $d->getElementsByTagName("failure")->length === 2
+                  && $d->getElementsByTagName("error")->length === 1
+                  && $top->getAttribute("failures") === "2"
+                  && $top->getAttribute("errors") === "1"
+              ));
+          '
 
       - name: Test Depends Failure Semantics
         # A producer failing only after a yield used to be recorded as passed at that yield: its
@@ -461,19 +485,18 @@ jobs:
                 grep -qF 'was not expected to be called' /tmp/mock-fail.log ;;
             esac
           done
-          # The automatic approach's post-yield violation: native failure in blocking mode, the
-          # deferred block plus exit 1 under Swoole -- never a silent pass.
+          # The automatic approach's post-yield violation: the whole runBare() -- verification
+          # included -- runs inside the coroutine, so the violation's Throwable arrives after
+          # the test's report and is replayed into the TestResult (see CounitExtension): a
+          # native failure with blocking's exact summary and exit code, in both modes -- never
+          # a silent pass.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/MockAutomaticViolationTest.php > /tmp/mock-auto.log 2> /tmp/mock-auto.err || rc=$?
           cat /tmp/mock-auto.log /tmp/mock-auto.err
           test "$rc" -eq 1
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'OK (1 test, 0 assertions)' /tmp/mock-auto.log
-            grep -qF 'was not expected to be called' /tmp/mock-auto.err
-          else
-            grep -qF 'Tests: 1, Assertions: 0, Failures: 1.' /tmp/mock-auto.log
-            grep -qF 'was not expected to be called' /tmp/mock-auto.log
-          fi
+          grep -qF 'Tests: 1, Assertions: 0, Failures: 1.' /tmp/mock-auto.log
+          grep -qF 'was not expected to be called' /tmp/mock-auto.log
+          ! grep -qF 'already been reported as passed' /tmp/mock-auto.err
           # Documented residual: a manual-approach mock created only after the first yield is
           # never verified under Swoole (blocking mode fails the test).
           rc=0
@@ -492,37 +515,29 @@ jobs:
         # PHPUnit 8/9 convert deprecations/notices/warnings into exceptions thrown at the call
         # site, through an error handler TestResult::run() registers OUTSIDE runBare() -- so a
         # post-yield convertible diagnostic used to hit no handler at all, in BOTH approaches:
-        # the test silently PASSED (exit 0) where blocking mode errors it (exit 2). counit now
-        # arms a delegating handler while the coroutine PHPUnit runs on is suspended and hands
-        # each diagnostic to PHPUnit's own converting handler, which throws the exact Error\*
-        # exception at the trigger site -- the body aborts into the deferred-failure block, exit
-        # code 1 (see Diagnostics). Each mode's exact output is asserted; what both must share
-        # is that the run FAILS. The pre-yield conversion and @-suppression stay native in both.
+        # the test silently PASSED (exit 0) where blocking mode errors it (exit 2). counit arms
+        # a delegating handler while the coroutine PHPUnit runs on is suspended and hands each
+        # diagnostic to PHPUnit's own converting handler, which throws the exact Error\*
+        # exception at the trigger site (see Diagnostics); the aborted body's Throwable is then
+        # replayed into the TestResult through the public addError() (see CounitExtension), so
+        # the ERRORS! summary, the listings and exit code 2 match blocking mode exactly and the
+        # expected output is identical with and without Swoole. The pre-yield conversion and
+        # @-suppression stay native in both.
         run: |
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/PostYieldDiagnosticsTest.php > /tmp/diag.log 2> /tmp/diag.err || rc=$?
           cat /tmp/diag.log /tmp/diag.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            test "$rc" -eq 1
-            grep -qF 'Tests: 4, Assertions: 1, Errors: 1.' /tmp/diag.log
-            grep -qF 'testNoticeAfterYield: late user notice' /tmp/diag.err
-            grep -qF 'testWarningAfterYield: late user warning' /tmp/diag.err
-          else
-            test "$rc" -eq 2
-            grep -qF 'Tests: 4, Assertions: 1, Errors: 3.' /tmp/diag.log
-          fi
+          test "$rc" -eq 2
+          grep -qF 'Tests: 4, Assertions: 1, Errors: 3.' /tmp/diag.log
+          grep -qF 'late user notice' /tmp/diag.log
+          grep -qF 'late user warning' /tmp/diag.log
+          ! grep -qF 'already been reported as passed' /tmp/diag.err
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/PostYieldDiagnosticsManualTest.php > /tmp/diag.log 2> /tmp/diag.err || rc=$?
           cat /tmp/diag.log /tmp/diag.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            test "$rc" -eq 1
-            grep -qF 'OK (2 tests, 0 assertions)' /tmp/diag.log
-            grep -qF 'testNoticeAfterYield: late user notice (manual)' /tmp/diag.err
-            grep -qF 'testWarningAfterYield: late user warning (manual)' /tmp/diag.err
-          else
-            test "$rc" -eq 2
-            grep -qF 'Tests: 2, Assertions: 0, Errors: 2.' /tmp/diag.log
-          fi
+          test "$rc" -eq 2
+          grep -qF 'Tests: 2, Assertions: 0, Errors: 2.' /tmp/diag.log
+          ! grep -qF 'already been reported as passed' /tmp/diag.err
 
       - name: Test Useless-Test Detection
         # The "did not perform any assertions" risky check (and its mirror, the

@@ -84,6 +84,32 @@ class Counit
     public static $deferredSkipTests = [];
 
     /**
+     * The TestCase object behind each $deferredFailures entry (same key). CounitExtension
+     * replays each deferred failure/error into the run's TestResult through its public
+     * addFailure()/addError() -- blocking PHPUnit's own classification: an AssertionFailedError
+     * fails the test, anything else errors it -- once every coroutine has drained, so the
+     * FAILURES!/ERRORS! summary counts, the listings and the run's exit code (1/2, through the
+     * `counit` script's alignment) match a blocking run exactly. Successfully replayed entries
+     * are removed from $deferredFailures, leaving the script's block as the fail-soft fallback
+     * (which then still forces a non-zero exit code). Stashed at deferral time, like
+     * $deferredSkipTests.
+     *
+     * @var array<string, TestCase>
+     */
+    public static $deferredFailureTests = [];
+
+    /**
+     * Every deferred post-yield verdict (skip/incomplete/failure/error), whether its replay
+     * later succeeds or not, for JunitXmlCorrector to write the matching
+     * <skipped/>/<failure>/<error> element into the report -- the JUnit logger's own listener
+     * callbacks no-op for a late verdict (its currentTestCase is null by then), so without the
+     * corrector the report kept calling failed tests passed.
+     *
+     * @var array<int, array{test: TestCase, throwable: \Throwable}>
+     */
+    public static $verdictsForReport = [];
+
+    /**
      * Per test key (spl_object_id() of its TestCase object): the up-front assertion credit
      * applied to it. The run total only needs the sum ($creditedAssertionCount); the JUnit
      * per-testcase correction needs to know which test carries which credit.
@@ -243,13 +269,20 @@ class Counit
                             // synchronously and its native handling applies.
                             $thrown = $e;
                         } elseif (($e instanceof SkippedTest) || ($e instanceof IncompleteTest)) {
-                            self::$deferredSkips[$description] = $e;
+                            $uniqueKey                        = self::uniqueDeferredKey($description, self::$deferredSkips);
+                            self::$deferredSkips[$uniqueKey]  = $e;
                             if ($caller instanceof TestCase) {
-                                self::$deferredSkipTests[$description] = $caller;
+                                self::$deferredSkipTests[$uniqueKey] = $caller;
+                                self::$verdictsForReport[]           = ['test' => $caller, 'throwable' => $e];
                             }
                             self::markAbortedAfterReport($key);
                         } else {
-                            self::$deferredFailures[$description] = $e;
+                            $uniqueKey                          = self::uniqueDeferredKey($description, self::$deferredFailures);
+                            self::$deferredFailures[$uniqueKey] = $e;
+                            if ($caller instanceof TestCase) {
+                                self::$deferredFailureTests[$uniqueKey] = $caller;
+                                self::$verdictsForReport[]              = ['test' => $caller, 'throwable' => $e];
+                            }
                             self::markAbortedAfterReport($key);
                         }
                     } else {
@@ -623,6 +656,27 @@ class Counit
         }
 
         return max(0, $emitted - $credit + $late);
+    }
+
+    /**
+     * Returns $description, made unique against the given deferred map. The description is built
+     * from the test's class, method and data-set names, which is not unique across a whole run
+     * (a manual-approach test wrapping several Counit::create() calls can defer more than one
+     * verdict), and a second deferred verdict used to silently overwrite the first -- one report
+     * simply vanished.
+     *
+     * @param array<string, \Throwable> $map
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function uniqueDeferredKey(string $description, array $map): string
+    {
+        $uniqueKey = $description;
+        for ($i = 2; isset($map[$uniqueKey]); $i++) {
+            $uniqueKey = sprintf('%s (%d)', $description, $i);
+        }
+
+        return $uniqueKey;
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Deminy\Counit;
 
 use PHPUnit\Framework\Assert;
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\TestResult;
 use PHPUnit\Runner\AfterLastTestHook;
 use PHPUnit\Runner\BeforeFirstTestHook;
@@ -134,6 +135,37 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
                 }
             }
             Counit::$deferredSkipTests = [];
+
+            // Replay the failure/error verdicts the same way: a body (or in-coroutine hook)
+            // Throwable that arrived only after the test's first yield lands in
+            // Counit::$deferredFailures, and used to surface only in the `counit` script's
+            // STDERR block with a forced exit code 1 while PHPUnit itself reported OK. Handing
+            // it to the public addFailure()/addError() here -- blocking PHPUnit's own
+            // classification: an AssertionFailedError fails the test, anything else errors it
+            // -- makes the FAILURES!/ERRORS! summary counts, the listings and (via the script's
+            // alignment) the native exit codes 1/2 match a blocking run exactly. A successfully
+            // replayed entry leaves $deferredFailures, so the script's block only reports what
+            // could not be recorded -- and only that fallback still forces exit code 1.
+            if (Counit::$testResult instanceof TestResult) {
+                foreach (Counit::$deferredFailures as $description => $throwable) {
+                    $test = Counit::$deferredFailureTests[$description] ?? null;
+                    if ($test === null) {
+                        continue;
+                    }
+
+                    try {
+                        if ($throwable instanceof AssertionFailedError) {
+                            Counit::$testResult->addFailure($test, $throwable, 0.0);
+                        } else {
+                            Counit::$testResult->addError($test, $throwable, 0.0);
+                        }
+                        unset(Counit::$deferredFailures[$description]);
+                    } catch (\Throwable $t) {
+                        // Left in $deferredFailures: the script's block reports it instead.
+                    }
+                }
+            }
+            Counit::$deferredFailureTests = [];
 
             // Emit the "did not perform any assertions" verdicts (and their mirror) PHPUnit
             // could not reach on its own, now that every coroutine has drained and the per-test

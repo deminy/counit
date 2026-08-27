@@ -20,8 +20,3 @@ parameters:
     -
       identifier: staticMethod.alreadyNarrowedType
       path: tests/regression/*
-    # LateFailureTest asserts literal false on purpose: it pins that a deliberate failure after
-    # the first yield forces exit code 1 through the deferred end-of-run block.
-    -
-      identifier: staticMethod.impossibleType
-      path: tests/regression/*
