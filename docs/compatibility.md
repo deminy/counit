@@ -17,6 +17,15 @@ with Swoole enabled** — the fast, concurrent mode this package exists for. Thi
 reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠️ works, with documented differences;
 ❌ do not rely on it under Swoole. Details for every ⚠️/❌ entry are in [Feature notes](#feature-notes).
 
+> **Prerequisite: everything below assumes PHPUnit extension `Deminy\Counit\CounitExtension` is registered** in your
+> _phpunit.xml_ / _phpunit.xml.dist_ — see [Register the PHPUnit extension](../README.md#register-the-phpunit-extension)
+> (on this line the element is `<extension class="…"/>`, not the 1.x `<bootstrap class="…"/>`). The extension is what
+> waits for every coroutine to drain before the summary is taken, and it is therefore what makes the reported time, the
+> assertion totals, and the late failure/skip/incomplete/risky replays described here hold at all. Without it,
+> _PHPUnit_ prints its summary mid-run: the reported time can understate the truth by orders of magnitude, and
+> assertion totals are neither correct nor consistent between a full run and the same tests run in isolation. Read the
+> ✅ entries below as "✅, with the extension registered".
+
 Rows are grouped by area — writing tests, fixtures and hooks, test doubles, outcomes and diagnostics, execution
 control, and reporting — and, within each area, ordered from the most widely used feature to the most niche one,
 so the entries a typical suite depends on come first.

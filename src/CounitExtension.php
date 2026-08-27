@@ -14,6 +14,22 @@ use Swoole\Coroutine;
 
 /**
  * @internal this class is not covered by the backward compatibility promise for counit
+ *
+ * Register this extension in your phpunit.xml / phpunit.xml.dist:
+ *
+ *     <extensions>
+ *         <extension class="Deminy\Counit\CounitExtension"/>
+ *     </extensions>
+ *
+ * (PHPUnit 10 removed the test-hook interfaces this class implements, so the 1.x line registers it
+ * as <bootstrap class="..."/> instead; the two forms are not interchangeable.)
+ *
+ * It is what waits for every coroutine to drain before PHPUnit's summary is taken, so it is what
+ * makes the run's reported time, its assertion totals, and the replay of late
+ * failure/skip/incomplete/risky verdicts correct. Unregistered, PHPUnit prints its summary while
+ * tests are still sleeping: the reported time can understate the truth by orders of magnitude, and
+ * assertion totals are neither correct nor consistent between a full run and the same tests run in
+ * isolation. See docs/compatibility.md, whose every guarantee assumes this extension is registered.
  */
 class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeTestHook
 {

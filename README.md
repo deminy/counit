@@ -13,6 +13,7 @@ Table of Contents
 * [How Does It Work](#how-does-it-work)
 * [Installation](#installation)
 * [Use "counit" in Your Project](#use-counit-in-your-project)
+   * [Register the PHPUnit Extension](#register-the-phpunit-extension)
 * [Examples](#examples)
    * [Setup Test Environment](#setup-test-environment)
    * [The Automatic Approach](#the-automatic-approach-recommended)
@@ -109,8 +110,51 @@ and is back-ported here where it applies.
   * **The manual approach**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php) instead of the PHP function _sleep()_.
 * Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
 * Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
-* Optional steps:
-  * use PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/0.x/src/CounitExtension.php) as shown in file [phpunit.xml.dist](https://github.com/deminy/counit/blob/0.x/phpunit.xml.dist). This is to wait the whole test suite to finish before printing out the summary information at the end.
+* **Register PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/0.x/src/CounitExtension.php) in your _phpunit.xml_ / _phpunit.xml.dist_.** See [Register the PHPUnit extension](#register-the-phpunit-extension) below; this package's own [phpunit.xml.dist](https://github.com/deminy/counit/blob/0.x/phpunit.xml.dist) registers it too.
+
+<a id="register-the-phpunit-extension"></a>
+## Register the PHPUnit Extension
+
+Without the extension registered, _PHPUnit_ prints its summary while your tests' coroutines are **still running**, so
+the run's reported numbers describe an unfinished run. Every compatibility guarantee in
+[Compatibility with PHPUnit](docs/compatibility.md) — reported time, assertion totals, late failures, skips and risky
+verdicts — assumes it is registered. Register it unless you have a specific reason not to.
+
+On this line (_PHPUnit_ 8 and 9), the class implements _PHPUnit_'s test-hook interfaces, so it is registered as an
+`<extension>`:
+
+```xml
+<extensions>
+    <extension class="Deminy\Counit\CounitExtension"/>
+</extensions>
+```
+
+Note that _PHPUnit_ 10 removed those interfaces, so the 1.x line uses a different element
+(`<bootstrap class="Deminy\Counit\CounitExtension"/>`). A snippet copied from the 1.x documentation into a _PHPUnit_
+8/9 project — or the reverse — does not work.
+
+### What goes wrong without it
+
+* **The reported time is not the real time.** A test's coroutine returns to _PHPUnit_ at its first yield, so _PHPUnit_
+  reports the test as finished and moves on while the body is still sleeping. With nothing waiting for those
+  coroutines, the summary is printed almost immediately and the process then sits silent until they drain. A real
+  example from a project on the 1.x line: a 358-test suite whose true wall-clock time was 9.6 seconds reported
+  `Time: 00:00.415`, then took another 9 seconds to exit. Wall-clock time (e.g. `time ./vendor/bin/counit`) is the
+  honest number in that situation; the extension makes _PHPUnit_'s own number honest again.
+* **Assertion totals are wrong, and not even self-consistent.** Assertions performed after a yield land in whichever
+  test's counting window happens to be open, and the up-front credit from `Counit::create($callable, $count)` is never
+  reconciled. In the same suite, the 60 slowest tests reported 1652 assertions when run in isolation but implied 2142
+  when run as part of the full suite — the same tests, the same code. With the extension registered both figures agree
+  at 1646, which is also what a fully blocking _PHPUnit_ run reports. **Treat any assertion total recorded without the
+  extension as unreliable**, including totals committed to a project's own documentation.
+* **Late verdicts degrade to a STDERR block.** A failure, error, skip or incomplete verdict that a test reaches after a
+  yield is normally replayed into the run's `TestResult` at the end of the run, so it lands in the summary, the
+  listings, the exit code and the JUnit report. That replay is the extension's work. Without it the runner falls back
+  to printing such verdicts to STDERR (still forcing a non-zero exit code for failures), outside the summary and
+  absent from `--log-junit` output, and the affected test's recorded status stays "passed".
+
+The extension is a reporting fix, not a performance trade-off: it waits for coroutines that were going to run anyway,
+so it does not slow a suite down measurably.
 
 # Examples
 
@@ -167,7 +211,8 @@ class SleepTest extends TestCase
 When customized method _setUpBeforeClass()_ and _tearDownAfterClass()_ are defined in the test cases, please make sure
 to call their parent methods accordingly in these customized methods.
 
-The total # of assertions reported at the end of a run matches _PHPUnit_ exactly, and the per-testcase counts in the
+With [the PHPUnit extension registered](#register-the-phpunit-extension), the total # of assertions reported at the end
+of a run matches _PHPUnit_ exactly, and the per-testcase counts in the
 JUnit XML report (`--log-junit`, the only _PHPUnit_ 8/9 output that shows per-test assertion counts) are corrected as
 well — exact whenever counit can observe the test's yields (sleep()/usleep() calls in a namespaced test class, and
 Counit::sleep()). An assertion performed after a yield counit cannot observe (e.g. hooked network IO) goes missing
