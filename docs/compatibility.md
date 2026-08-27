@@ -11,7 +11,15 @@ _Counit_ is designed as a drop-in companion to _PHPUnit_, not a replacement. In 
   starts, which plain _PHPUnit_ never does — a loaded-but-idle Swoole extension changes nothing.
 
 The two matrices below therefore describe the one remaining combination: running tests **under the _counit_ runner
-with Swoole enabled** — the fast, concurrent mode this package exists for. The _Counit 0.x_ column (the maintenance
+with Swoole enabled** — the fast, concurrent mode this package exists for.
+
+> **Prerequisite: everything below assumes PHPUnit extension `Deminy\Counit\CounitExtension` is registered** in your
+> _phpunit.xml_ / _phpunit.xml.dist_ — see [Register the PHPUnit extension](../README.md#register-the-phpunit-extension).
+> The extension is what waits for every coroutine to drain before the summary is taken, and it is therefore what makes
+> the reported time, the assertion totals, and the late failure/skip/risky replays described here hold at all. Without
+> it, _PHPUnit_ prints its summary mid-run: the reported time can understate the truth by orders of magnitude, and
+> assertion totals are neither correct nor consistent between a full run and the same tests run in isolation. Read the
+> ✅ entries below as "✅, with the extension registered". The _Counit 0.x_ column (the maintenance
 line for _PHPUnit_ ~8.0/~9.0, which uses annotations instead of attributes and a different internal architecture) is
 included for reference only. Legend: ✅ behaves as under plain _PHPUnit_; ⚠️ works, with documented differences;
 ❌ do not rely on it under Swoole. Details for every ⚠️/❌ entry are in [Feature notes](#feature-notes).
