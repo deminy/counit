@@ -12,9 +12,10 @@ use Deminy\Counit\TestCase;
  * under Swoole, so every repetition runs and fails late -- and the deferred entries used to
  * share one description-based key, silently overwriting each other: only one of N failing
  * repetitions was reported. Each occurrence now gets its own entry (see
- * Counit::uniqueDeferredKey()). Run by the compatibility workflow with --repeat 2, asserting
- * exit code 1 in both modes, both entries under Swoole, and blocking mode's native
- * stop-at-first-failure summary (the second repetition is skipped there).
+ * Counit::uniqueDeferredKey()) and its own replayed Test\Failed event (see LateFailures). Run
+ * by the compatibility workflow with --repeat 2, asserting exit code 1 in both modes, both
+ * native failure entries under Swoole, and blocking mode's native stop-at-first-failure summary
+ * (the second repetition is skipped there).
  *
  * @internal
  * @coversNothing

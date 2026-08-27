@@ -530,8 +530,10 @@ class TestCase extends BaseTestCase
 
         if ($thrown !== null) {
             $description = sprintf('%s::%s (after-test hooks)', static::class, $this->nameWithDataSet());
+            $key         = Counit::uniqueDeferredKey($description, Counit::$deferredFailures);
 
-            Counit::$deferredFailures[Counit::uniqueDeferredKey($description, Counit::$deferredFailures)] = $thrown;
+            Counit::$deferredFailures[$key] = $thrown;
+            LateFailures::markDeferred($eventTest, $key, $thrown);
         }
     }
 

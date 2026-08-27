@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Event\Code\Test;
+use PHPUnit\Event\Code\TestMethod;
+use PHPUnit\Event\Code\ThrowableBuilder;
 use PHPUnit\Event\DeferringDispatcher;
 use PHPUnit\Event\DirectDispatcher;
 use PHPUnit\Event\Facade as EventFacade;
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Logging\JUnit\JunitXmlLogger;
 use PHPUnit\Logging\JUnit\Subscriber as JunitSubscriber;
+use PHPUnit\Util\Xml;
 
 /**
  * Corrects the per-testcase `assertions` attributes (and the testsuite aggregates computed from
@@ -105,22 +110,110 @@ class JunitXmlCorrector
                 $testCase->setAttribute('assertions', (string) $corrected);
             }
 
-            // Recompute every testsuite aggregate from its (now corrected) descendant testcases.
-            foreach ($document->getElementsByTagName('testsuite') as $testSuite) {
-                if (!$testSuite->hasAttribute('assertions')) {
-                    continue;
-                }
+            self::writeDeferredVerdicts($document);
 
-                $total = 0;
-                foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
-                    if ($testCase->hasAttribute('assertions')) {
-                        $total += (int) $testCase->getAttribute('assertions');
+            // Recompute every testsuite aggregate from its (now corrected) descendant testcases.
+            // The failures/errors/skipped aggregates count the verdict elements just written (and
+            // PHPUnit's own), so the report's counters match its contents.
+            foreach ($document->getElementsByTagName('testsuite') as $testSuite) {
+                foreach (['assertions' => null, 'failures' => 'failure', 'errors' => 'error', 'skipped' => 'skipped'] as $attribute => $verdictElement) {
+                    if (!$testSuite->hasAttribute($attribute)) {
+                        continue;
                     }
+
+                    $total = 0;
+                    foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
+                        if ($verdictElement === null) {
+                            $total += (int) $testCase->getAttribute('assertions');
+                        } elseif ($testCase->getElementsByTagName($verdictElement)->length > 0) {
+                            $total++;
+                        }
+                    }
+                    $testSuite->setAttribute($attribute, (string) $total);
                 }
-                $testSuite->setAttribute('assertions', (string) $total);
             }
         } catch (\Throwable) {
             // PHPUnit's internals have changed; leave the report as PHPUnit produced it.
+        }
+    }
+
+    /**
+     * Puts the JUnit logger (when one is registered) into a state where a replayed
+     * skipped/incomplete/failed/errored event is harmless, returning a restore callback -- or
+     * null when there is no JUnit logger, or its internals no longer match (the emitters'
+     * per-emit catch then still turns a crash into their fallback path). The logger's testsuite
+     * stack has already unwound when ExecutionFinished fires and its own `prepared` flag is
+     * false, so an unshielded replayed event dies in handleFinish() on the empty stack, killing
+     * the run with exit code 255 and a zero-byte report. With `prepared` set, the handlers only
+     * append a verdict element to `currentTestCase` -- pointed at a DETACHED decoy element, so
+     * the report is not touched (writeDeferredVerdicts() writes the real elements instead) --
+     * and increment the current level's skipped/errors/failures counter, all snapshotted and
+     * restored (the run is over; the counters are never written out).
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function shieldLogger(): ?callable
+    {
+        try {
+            $logger = self::junitLogger();
+            if ($logger === null) {
+                return null;
+            }
+
+            $reflection = new \ReflectionObject($logger);
+            foreach (['document', 'prepared', 'currentTestCase', 'testSuiteSkipped', 'testSuiteErrors', 'testSuiteFailures', 'testSuiteLevel'] as $name) {
+                if (!$reflection->hasProperty($name)) {
+                    return null;
+                }
+            }
+
+            $document = (new \ReflectionProperty($logger, 'document'))->getValue($logger);
+            if (!$document instanceof \DOMDocument) {
+                return null;
+            }
+
+            $prepared        = new \ReflectionProperty($logger, 'prepared');
+            $currentTestCase = new \ReflectionProperty($logger, 'currentTestCase');
+            $counterNames    = ['testSuiteSkipped', 'testSuiteErrors', 'testSuiteFailures'];
+
+            $oldPrepared = $prepared->getValue($logger);
+            $oldCurrent  = $currentTestCase->getValue($logger);
+            $level       = (new \ReflectionProperty($logger, 'testSuiteLevel'))->getValue($logger);
+
+            if (!is_bool($oldPrepared) || !is_int($level)) {
+                return null;
+            }
+
+            $counterProperties = [];
+            $oldCounters       = [];
+            foreach ($counterNames as $name) {
+                $property = new \ReflectionProperty($logger, $name);
+                $counters = $property->getValue($logger);
+                if (!is_array($counters)) {
+                    return null;
+                }
+
+                $counterProperties[$name] = $property;
+                $oldCounters[$name]       = $counters;
+            }
+
+            $prepared->setValue($logger, true);
+            $currentTestCase->setValue($logger, $document->createElement('testcase'));
+            foreach ($counterProperties as $name => $property) {
+                $counters         = $oldCounters[$name];
+                $counters[$level] ??= 0;
+                $property->setValue($logger, $counters);
+            }
+
+            return static function () use ($logger, $prepared, $currentTestCase, $counterProperties, $oldPrepared, $oldCurrent, $oldCounters): void {
+                $prepared->setValue($logger, $oldPrepared);
+                $currentTestCase->setValue($logger, $oldCurrent);
+                foreach ($counterProperties as $name => $property) {
+                    $property->setValue($logger, $oldCounters[$name]);
+                }
+            };
+        } catch (\Throwable) {
+            return null;
         }
     }
 
@@ -167,6 +260,76 @@ class JunitXmlCorrector
         }
 
         return null;
+    }
+
+    /**
+     * Writes the deferred post-yield verdicts into the report: a <failure>/<error> element for
+     * every entry LateFailures recorded (in the exact shape PHPUnit's own logger writes, type
+     * attribute and description-plus-stack-trace text included) and a <skipped/> element for
+     * every entry LateSkips recorded -- PHPUnit's logger writes <skipped/> for incomplete tests
+     * too. Without this, a test that failed or skipped only after its first yield stays "passed"
+     * in the surface CI systems actually parse, while the run itself exits non-zero. Elements
+     * are matched by class and name exactly like the assertion-count correction above; a verdict
+     * whose element cannot be found (or which already carries one) is skipped.
+     */
+    private static function writeDeferredVerdicts(\DOMDocument $document): void
+    {
+        $verdicts = [];
+
+        foreach (LateFailures::forReport() as $deferred) {
+            $verdicts[] = [$deferred['test'], $deferred['throwable'], null];
+        }
+        foreach (LateSkips::forReport() as $deferred) {
+            $verdicts[] = [$deferred['test'], $deferred['throwable'], 'skipped'];
+        }
+
+        if ($verdicts === []) {
+            return;
+        }
+
+        // Class name -> test name -> the verdicts recorded for it, in order (repetitions of one
+        // test under --repeat can defer more than one).
+        $byClassAndName = [];
+        foreach ($verdicts as [$test, $throwable, $type]) {
+            if (!$test instanceof TestMethod) {
+                continue;
+            }
+
+            $byClassAndName[$test->className()][$test->name()][] = [$throwable, $type];
+        }
+
+        foreach ($document->getElementsByTagName('testcase') as $testCase) {
+            $className = $testCase->getAttribute('class');
+            $name      = $testCase->getAttribute('name');
+            if (!isset($byClassAndName[$className][$name]) || $byClassAndName[$className][$name] === []) {
+                continue;
+            }
+
+            [$throwable, $type] = array_shift($byClassAndName[$className][$name]);
+
+            if ($testCase->getElementsByTagName('failure')->length > 0
+                || $testCase->getElementsByTagName('error')->length > 0
+                || $testCase->getElementsByTagName('skipped')->length > 0) {
+                continue; // Already carries a verdict (e.g. a natively reported repetition).
+            }
+
+            if ($type === 'skipped') {
+                $testCase->appendChild($document->createElement('skipped'));
+
+                continue;
+            }
+
+            // Mirrors JunitXmlLogger::handleFault(): failure for an assertion-level Throwable,
+            // error otherwise, with the same element text.
+            $type           = ($throwable instanceof \AssertionError || $throwable instanceof AssertionFailedError) ? 'failure' : 'error';
+            $eventThrowable = ThrowableBuilder::from($throwable);
+            $buffer         = sprintf('%s::%s%s', $className, $name, PHP_EOL);
+            $buffer .= trim($eventThrowable->description() . PHP_EOL . $eventThrowable->stackTrace());
+
+            $fault = $document->createElement($type, Xml::prepareString($buffer));
+            $fault->setAttribute('type', $eventThrowable->className());
+            $testCase->appendChild($fault);
+        }
     }
 
     /**

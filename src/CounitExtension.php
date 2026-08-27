@@ -286,10 +286,12 @@ final class CounitExtension implements Extension
                     // still honor a Test\ConsideredRisky event emitted here, because the
                     // collector is only read after this subscriber returns. Must run before the
                     // correction below, which consumes the counter residue.
-                    // LateSkips first: its Test\Skipped/Test\MarkedIncomplete events also reach
-                    // the extension's own subscribers, marking the tests aborted before the
-                    // useless-test pass reads the exemptions. See LateSkips.
+                    // LateSkips first (a skipped test's verdict beats any failure bookkeeping),
+                    // then LateFailures; both emit real PHPUnit events that also reach the
+                    // extension's own subscribers, marking the tests aborted before the
+                    // useless-test pass reads the exemptions. See LateSkips/LateFailures.
                     LateSkips::emitDeferred();
+                    LateFailures::emitDeferred();
                     UselessTests::emitDeferred();
                     HandlerIsolation::emitDeferred();
 

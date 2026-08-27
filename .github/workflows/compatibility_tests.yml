@@ -94,6 +94,10 @@ jobs:
           test -s /tmp/late-skip.xml
           grep -qF '</testsuites>' /tmp/late-skip.xml
           test "$(grep -c '<testcase' /tmp/late-skip.xml)" -eq 3
+          # The report carries the verdicts (JunitXmlCorrector writes the late <skipped/>
+          # elements and recomputes the aggregate), identical with and without Swoole.
+          test "$(grep -c '<skipped/>' /tmp/late-skip.xml)" -eq 3
+          grep -qF 'skipped="3"' /tmp/late-skip.xml
 
       - name: Test Depends Failure Semantics
         # A producer failing only after a yield used to be recorded as passed at that yield: its
@@ -142,10 +146,11 @@ jobs:
         # Throwable it raises after the failed setUp() is swallowed (the setUp() error stands),
         # and the class's next test gets the relocated replay again -- identical output with and
         # without Swoole. (2) A skip signalled from tearDown() after a passing body is a test
-        # FAILURE under blocking PHPUnit, never a skip; under Swoole the verdict is already out,
-        # so the skip must land in the deferred failure block and force exit code 1 -- not be
-        # dropped with exit code 0. The two modes diverge on the second run's output by design,
-        # so each is asserted against its own expectation; both must exit 1.
+        # FAILURE under blocking PHPUnit, never a skip; under Swoole the verdict only exists
+        # after the test's report and is replayed as PHPUnit's own Test\Failed event (see
+        # LateFailures -- PHPUnit's SkippedWithMessageException extends AssertionFailedError, so
+        # the classification is upstream's own), converging the summary and exit code with
+        # blocking mode exactly.
         run: |
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/SetUpFailureHooksTest.php > /tmp/setup-fail.log 2> /tmp/setup-fail.err || rc=$?
@@ -163,12 +168,8 @@ jobs:
           ./counit -c phpunit.xml.dist tests/regression/TearDownSkipTest.php > /tmp/teardown-skip.log 2> /tmp/teardown-skip.err || rc=$?
           cat /tmp/teardown-skip.log /tmp/teardown-skip.err
           test "$rc" -eq 1
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            grep -qF 'OK (2 tests, 2 assertions)' /tmp/teardown-skip.log
-            grep -qF 'deliberate skip from tearDown()' /tmp/teardown-skip.err
-          else
-            grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
-          fi
+          grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
+          ! grep -qF 'already been reported as passed' /tmp/teardown-skip.err
           # In neither mode may the skip be honored as a skip.
           ! grep -qF 'Skipped:' /tmp/teardown-skip.log
 
@@ -596,22 +597,19 @@ jobs:
           grep -qF 'PostYieldDiagnosticsAttributionTest::testAFirst' /tmp/diag-attr.log
           grep -qF 'PostYieldDiagnosticsAttributionTest::testBSecond' /tmp/diag-attr.log
           # E_USER_ERROR after a yield: PHPUnit's handler throws for it, and the delegation lets
-          # that abort the body -- a deferred failure with exit code 1 under Swoole (blocking
-          # errors the test natively, exit code 2; the 1-vs-2 divergence is the documented
-          # residual). Before the fix the run was KILLED with exit code 255 in Swoole mode.
+          # that abort the body. Once deferred failures were only a STDERR block (exit code 1 vs
+          # blocking's native 2); the replayed Test\Errored (see LateFailures) now converges the
+          # summary, the listing and the exit code with blocking mode exactly. Before the
+          # original fix the run was KILLED with exit code 255 in Swoole mode.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/PostYieldUserErrorTest.php > /tmp/diag-ue.log 2> /tmp/diag-ue.err || rc=$?
           cat /tmp/diag-ue.log /tmp/diag-ue.err
           ! grep -qF 'Fatal error' /tmp/diag-ue.log
           ! grep -qF 'Fatal error' /tmp/diag-ue.err
-          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
-            test "$rc" -eq 1
-            grep -qF 'Tests: 1, Assertions: 0, Errors: 1, Deprecations: 1.' /tmp/diag-ue.log
-            grep -qF 'E_USER_ERROR was triggered' /tmp/diag-ue.err
-          else
-            test "$rc" -eq 2
-            grep -qF 'Tests: 1, Assertions: 0, Errors: 2, Deprecations: 1.' /tmp/diag-ue.log
-          fi
+          ! grep -qF 'already been reported as passed' /tmp/diag-ue.err
+          test "$rc" -eq 2
+          grep -qF 'Tests: 1, Assertions: 0, Errors: 2, Deprecations: 1.' /tmp/diag-ue.log
+          grep -qF 'E_USER_ERROR was triggered' /tmp/diag-ue.log
 
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are captured from the
@@ -685,21 +683,67 @@ jobs:
       - name: Test Deferred-Failure Reporting Under --repeat
         # PHPUnit 12.5/13 ship --repeat (and --retry) again. A post-yield failure is invisible at
         # the repetition boundary under Swoole, so every repetition runs and fails late; the
-        # deferred entries used to share one description-based key, silently overwriting each
+        # deferred verdicts used to share one description-based key, silently overwriting each
         # other -- only one of N failing repetitions was reported. Each occurrence now gets its
-        # own entry (see Counit::uniqueDeferredKey()) and the run still exits 1. Blocking mode
-        # stops repeating at the first failure natively (the second repetition is skipped).
+        # own entry (see Counit::uniqueDeferredKey()) and is replayed as its own native
+        # Test\Failed event (see LateFailures), so the Swoole run reports every failing
+        # repetition in the failure listing with exit code 1. Blocking mode stops repeating at
+        # the first failure natively (the second repetition is skipped) -- the sequencing
+        # divergence is the documented --repeat residual.
         run: |
           rc=0
           ./counit -c phpunit.xml.dist --repeat 2 tests/regression/RepeatFailureTest.php > /tmp/repeat.log 2>&1 || rc=$?
           cat /tmp/repeat.log
           test "$rc" -eq 1
           if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'Tests: 2, Assertions: 4, Failures: 2.' /tmp/repeat.log
             test "$(grep -c 'RepeatFailureTest::testFailsAfterYield' /tmp/repeat.log)" -eq 2
-            grep -qF 'testFailsAfterYield (2):' /tmp/repeat.log
+            ! grep -qF 'already been reported as passed' /tmp/repeat.log
           else
             grep -qF 'Tests: 2, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/repeat.log
           fi
+
+      - name: Test Late Failure/Error Handling
+        # A failure or error that happens only after the test's first yield -- a body
+        # assertion/exception, a relocated tearDown()/#[After] throwable, or a Counit::defer()
+        # cleanup throwable -- used to surface only in counit's end-of-run STDERR block with a
+        # forced exit code 1, while PHPUnit itself reported OK. The verdicts are now replayed
+        # through PHPUnit's own Test\Failed/Test\Errored events once every coroutine has drained
+        # (see LateFailures): summary counts, listings, exit codes and the JUnit report match
+        # blocking mode exactly, so the expected output is identical with and without Swoole and
+        # the old block must be absent. The data-set target pins the value-object identity
+        # handling; the JUnit leg pins the corrector-written <failure>/<error> elements and the
+        # recomputed aggregates (and, for the skip fixture, the <skipped/> elements).
+        run: |
+          for target in LateFailureTest LateFailureManualTest TearDownErrorTest; do
+            rc=0
+            ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/late-fail.log 2> /tmp/late-fail.err || rc=$?
+            cat /tmp/late-fail.log /tmp/late-fail.err
+            test "$rc" -eq 2
+            ! grep -qF 'already been reported as passed' /tmp/late-fail.err
+            case "$target" in
+              LateFailureTest)       grep -qF 'Tests: 5, Assertions: 8, Errors: 1, Failures: 2.' /tmp/late-fail.log
+                                     grep -qF 'testDataSetFailsAfterYield@failing set' /tmp/late-fail.log ;;
+              LateFailureManualTest) grep -qF 'Tests: 2, Assertions: 3, Errors: 1, Failures: 1.' /tmp/late-fail.log ;;
+              TearDownErrorTest)     grep -qF 'Tests: 2, Assertions: 2, Errors: 1.' /tmp/late-fail.log
+                                     grep -qF 'deliberate tearDown() error' /tmp/late-fail.log ;;
+            esac
+          done
+          # The JUnit report carries the verdicts: real <failure>/<error> elements with matching
+          # testsuite aggregates, identical with and without Swoole.
+          rc=0
+          ./counit -c phpunit.xml.dist --log-junit /tmp/late-fail.xml tests/regression/LateFailureTest.php > /dev/null 2>&1 || rc=$?
+          test "$rc" -eq 2
+          php -r '
+              $d = new DOMDocument();
+              exit((int) !(
+                  $d->load("/tmp/late-fail.xml")
+                  && $d->getElementsByTagName("failure")->length === 2
+                  && $d->getElementsByTagName("error")->length === 1
+                  && $d->documentElement->firstElementChild->getAttribute("failures") === "2"
+                  && $d->documentElement->firstElementChild->getAttribute("errors") === "1"
+              ));
+          '
 
       - name: Test Aggregate Code Coverage
         # Under Swoole, essentially all post-yield test code runs during counit's end-of-run

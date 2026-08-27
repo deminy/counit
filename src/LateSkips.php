@@ -53,6 +53,15 @@ final class LateSkips
     private static array $pending = [];
 
     /**
+     * Every deferred skip/incomplete verdict recorded (whether the event emission later succeeds
+     * or not), for JunitXmlCorrector to write the matching <skipped/> element into the report --
+     * the corrector path works even when the event could not be emitted.
+     *
+     * @var list<array{test: Test, throwable: \Throwable}>
+     */
+    private static array $forReport = [];
+
+    /**
      * A markTestSkipped()/markTestIncomplete() call that happened after the test was reported.
      * $key is the description Counit::$deferredSkips filed it under, so a successful emit can
      * drop the entry from the `counit` script's end-of-run notice.
@@ -61,7 +70,18 @@ final class LateSkips
     {
         if ($test !== null && !isset(self::$pending[$test->id()])) {
             self::$pending[$test->id()] = ['test' => $test, 'key' => $key, 'throwable' => $throwable];
+            self::$forReport[]          = ['test' => $test, 'throwable' => $throwable];
         }
+    }
+
+    /**
+     * The recorded verdicts, for JunitXmlCorrector.
+     *
+     * @return list<array{test: Test, throwable: \Throwable}>
+     */
+    public static function forReport(): array
+    {
+        return self::$forReport;
     }
 
     /**
@@ -86,8 +106,9 @@ final class LateSkips
         // whose own `prepared` flag is false -- a replayed event therefore takes its unprepared
         // path into an empty stack and DIES (an assert() failure under dev settings, a
         // null-appendChild Error otherwise), killing the whole run with exit code 255 and a
-        // zero-byte report. Shield it for the emit's duration; see shieldJunitLogger().
-        $restoreJunitLogger = self::shieldJunitLogger();
+        // zero-byte report. Shield it for the emit's duration; see
+        // JunitXmlCorrector::shieldLogger().
+        $restoreJunitLogger = JunitXmlCorrector::shieldLogger();
 
         try {
             foreach (self::$pending as $deferred) {
@@ -126,72 +147,14 @@ final class LateSkips
     }
 
     /**
-     * Puts the JUnit logger (when one is registered) into a state where a replayed
-     * skipped/incomplete event is harmless, returning a restore callback -- or null when there
-     * is no JUnit logger, or its internals no longer match (the per-emit catch above then still
-     * turns a crash into the notice fallback). With its `prepared` flag set, the logger's
-     * handler only appends a <skipped/> element to `currentTestCase` -- pointed at a DETACHED
-     * decoy element, so the report is not touched -- and increments the current level's skipped
-     * counter, which is pre-seeded (the run is over; the counter is never written out). The
-     * report still records the test as passed -- the documented per-test reporting residual --
-     * but the run completes, the summary counts stay exact, and the report file is written.
-     */
-    private static function shieldJunitLogger(): ?callable
-    {
-        try {
-            $logger = JunitXmlCorrector::junitLogger();
-            if ($logger === null) {
-                return null;
-            }
-
-            $reflection = new \ReflectionObject($logger);
-            foreach (['document', 'prepared', 'currentTestCase', 'testSuiteSkipped', 'testSuiteLevel'] as $name) {
-                if (!$reflection->hasProperty($name)) {
-                    return null;
-                }
-            }
-
-            $document = (new \ReflectionProperty($logger, 'document'))->getValue($logger);
-            if (!$document instanceof \DOMDocument) {
-                return null;
-            }
-
-            $prepared        = new \ReflectionProperty($logger, 'prepared');
-            $currentTestCase = new \ReflectionProperty($logger, 'currentTestCase');
-            $skippedCounters = new \ReflectionProperty($logger, 'testSuiteSkipped');
-
-            $oldPrepared = $prepared->getValue($logger);
-            $oldCurrent  = $currentTestCase->getValue($logger);
-            $oldCounters = $skippedCounters->getValue($logger);
-            $level       = (new \ReflectionProperty($logger, 'testSuiteLevel'))->getValue($logger);
-
-            if (!is_bool($oldPrepared) || !is_array($oldCounters) || !is_int($level)) {
-                return null;
-            }
-
-            $counters         = $oldCounters;
-            $counters[$level] ??= 0;
-
-            $prepared->setValue($logger, true);
-            $currentTestCase->setValue($logger, $document->createElement('testcase'));
-            $skippedCounters->setValue($logger, $counters);
-
-            return static function () use ($logger, $prepared, $currentTestCase, $skippedCounters, $oldPrepared, $oldCurrent, $oldCounters): void {
-                $prepared->setValue($logger, $oldPrepared);
-                $currentTestCase->setValue($logger, $oldCurrent);
-                $skippedCounters->setValue($logger, $oldCounters);
-            };
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
-    /**
      * Sets the result collector's `prepared` flag and returns its previous value, or null when
      * PHPUnit's internals have changed (in which case nothing is emitted rather than the Tests:
-     * count breaking).
+     * count breaking). Shared with LateFailures, whose Test\Errored emits hit the same
+     * unprepared numberOfTestsRun bump.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
      */
-    private static function pretendPrepared(bool $prepared): ?bool
+    public static function pretendPrepared(bool $prepared): ?bool
     {
         try {
             $collector = (new \ReflectionProperty(TestResultFacade::class, 'collector'))->getValue();

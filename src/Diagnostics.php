@@ -70,9 +70,10 @@ final class Diagnostics
      * The levels handed to PHPUnit's handler. For everything but E_USER_ERROR that records one of
      * PHPUnit's issue events; for E_USER_ERROR the handler THROWS ("E_USER_ERROR was triggered"),
      * exactly as in blocking mode -- at the trigger site inside the coroutine, so the body aborts
-     * into counit's deferred-failure machinery with exit code 1 (blocking errors the test
-     * natively, exit code 2 -- a documented residual). Without this, a post-yield E_USER_ERROR
-     * reached PHP's default handler and KILLED the whole run with exit code 255.
+     * into counit's deferred-failure machinery, whose replayed Test\Errored (see LateFailures)
+     * then errors the test with blocking's exact summary and exit code 2. Without this, a
+     * post-yield E_USER_ERROR reached PHP's default handler and KILLED the whole run with exit
+     * code 255.
      */
     private const int LEVELS = \E_DEPRECATED | \E_USER_DEPRECATED | \E_NOTICE | \E_USER_NOTICE | \E_WARNING | \E_USER_WARNING | \E_USER_ERROR;
 

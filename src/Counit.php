@@ -181,7 +181,9 @@ class Counit
                             LateSkips::markDeferred($testValueObject, $key, $e);
                             self::markAbortedAfterReport($testId);
                         } else {
-                            self::$deferredFailures[self::uniqueDeferredKey($description, self::$deferredFailures)] = $e;
+                            $key                          = self::uniqueDeferredKey($description, self::$deferredFailures);
+                            self::$deferredFailures[$key] = $e;
+                            LateFailures::markDeferred($testValueObject, $key, $e);
                             self::markAbortedAfterReport($testId);
                         }
                     } else {
@@ -203,7 +205,9 @@ class Counit
                                 self::$deferredSkips[$key] = $e;
                                 LateSkips::markDeferred($testValueObject, $key, $e);
                             } else {
-                                self::$deferredFailures[self::uniqueDeferredKey($description . ' (deferred cleanup)', self::$deferredFailures)] = $e;
+                                $key                          = self::uniqueDeferredKey($description . ' (deferred cleanup)', self::$deferredFailures);
+                                self::$deferredFailures[$key] = $e;
+                                LateFailures::markDeferred($testValueObject, $key, $e);
                             }
                             self::markAbortedAfterReport($testId);
                         } elseif ($caught === null) {
