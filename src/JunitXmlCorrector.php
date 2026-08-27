@@ -125,11 +125,12 @@ class JunitXmlCorrector
     }
 
     /**
-     * The JUnit logger's in-memory report, reached through the event dispatcher's subscriber list:
+     * The JUnit logger instance, reached through the event dispatcher's subscriber list:
      * Facade -> DeferringDispatcher -> DirectDispatcher -> subscribers -> any JUnit subscriber ->
-     * its logger -> the logger's DOMDocument. Null when no JUnit logging is configured.
+     * its logger. Null when no JUnit logging is configured. Public so LateSkips can shield the
+     * logger's state while replaying deferred verdicts; see LateSkips::emitDeferred().
      */
-    private static function junitDocument(): ?\DOMDocument
+    public static function junitLogger(): ?JunitXmlLogger
     {
         $facade = EventFacade::instance();
 
@@ -159,16 +160,27 @@ class JunitXmlCorrector
                 }
 
                 $logger = (new \ReflectionProperty(JunitSubscriber::class, 'logger'))->getValue($subscriber);
-                if (!$logger instanceof JunitXmlLogger) {
-                    continue;
+                if ($logger instanceof JunitXmlLogger) {
+                    return $logger;
                 }
-
-                $document = (new \ReflectionProperty($logger, 'document'))->getValue($logger);
-
-                return $document instanceof \DOMDocument ? $document : null;
             }
         }
 
         return null;
+    }
+
+    /**
+     * The JUnit logger's in-memory report document. Null when no JUnit logging is configured.
+     */
+    private static function junitDocument(): ?\DOMDocument
+    {
+        $logger = self::junitLogger();
+        if ($logger === null) {
+            return null;
+        }
+
+        $document = (new \ReflectionProperty($logger, 'document'))->getValue($logger);
+
+        return $document instanceof \DOMDocument ? $document : null;
     }
 }

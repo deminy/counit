@@ -79,6 +79,19 @@ jobs:
           # ... and the --fail-on-* exit codes are exact in both modes.
           rc=0; ./counit -c phpunit.xml.dist --fail-on-skipped    tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
           rc=0; ./counit -c phpunit.xml.dist --fail-on-incomplete tests/regression/LateSkipTest.php > /dev/null 2>&1 || rc=$?; test "$rc" -eq 1
+          # The replay must survive an active JUnit logger: its testsuite stack has already
+          # unwound when ExecutionFinished fires, and an unshielded replayed event used to kill
+          # the whole run (exit code 255, zero-byte report). The summary must stay exact and the
+          # report must be written and well-formed in both modes.
+          rc=0
+          ./counit -c phpunit.xml.dist --log-junit /tmp/late-skip.xml tests/regression/LateSkipTest.php > /tmp/late-skip.log 2> /tmp/late-skip.err || rc=$?
+          cat /tmp/late-skip.log /tmp/late-skip.err
+          test "$rc" -eq 0
+          grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
+          ! grep -qF 'status remains "passed"' /tmp/late-skip.err
+          test -s /tmp/late-skip.xml
+          grep -qF '</testsuites>' /tmp/late-skip.xml
+          test "$(grep -c '<testcase' /tmp/late-skip.xml)" -eq 3
 
       - name: Test Depends Failure Semantics
         # A producer failing only after a yield used to be recorded as passed at that yield: its

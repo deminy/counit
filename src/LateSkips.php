@@ -81,26 +81,109 @@ final class LateSkips
             return;
         }
 
-        foreach (self::$pending as $deferred) {
-            $throwable = $deferred['throwable'];
+        // The JUnit logger is a stateful buffered DOM writer whose testsuite stack has already
+        // unwound when ExecutionFinished fires (the root TestSuite\Finished precedes it), and
+        // whose own `prepared` flag is false -- a replayed event therefore takes its unprepared
+        // path into an empty stack and DIES (an assert() failure under dev settings, a
+        // null-appendChild Error otherwise), killing the whole run with exit code 255 and a
+        // zero-byte report. Shield it for the emit's duration; see shieldJunitLogger().
+        $restoreJunitLogger = self::shieldJunitLogger();
 
-            if ($throwable instanceof IncompleteTest) {
-                // The real Throwable makes the incomplete listing's file:line point at the
-                // test, as in blocking mode.
-                EventFacade::emitter()->testMarkedAsIncomplete($deferred['test'], ThrowableBuilder::from($throwable));
-            } else {
-                $message = $throwable->getMessage();
+        try {
+            foreach (self::$pending as $deferred) {
+                $throwable = $deferred['throwable'];
 
-                EventFacade::emitter()->testSkipped($deferred['test'], $message === '' ? 'Skipped after the test had already been reported' : $message);
+                try {
+                    if ($throwable instanceof IncompleteTest) {
+                        // The real Throwable makes the incomplete listing's file:line point at
+                        // the test, as in blocking mode.
+                        EventFacade::emitter()->testMarkedAsIncomplete($deferred['test'], ThrowableBuilder::from($throwable));
+                    } else {
+                        $message = $throwable->getMessage();
+
+                        EventFacade::emitter()->testSkipped($deferred['test'], $message === '' ? 'Skipped after the test had already been reported' : $message);
+                    }
+                } catch (\Throwable) {
+                    // A logger rejected the replay (a stateful writer whose run scope has closed,
+                    // reached through a shape the shield above does not know): leave the entry to
+                    // the script's notice -- degraded, never a crashed run.
+                    continue;
+                }
+
+                // Reported natively now, so the script's notice must not repeat (or contradict)
+                // it.
+                unset(Counit::$deferredSkips[$deferred['key']]);
             }
 
-            // Reported natively now, so the script's notice must not repeat (or contradict) it.
-            unset(Counit::$deferredSkips[$deferred['key']]);
+            self::$pending = [];
+        } finally {
+            if ($restoreJunitLogger !== null) {
+                $restoreJunitLogger();
+            }
+
+            self::pretendPrepared($previous);
         }
+    }
 
-        self::$pending = [];
+    /**
+     * Puts the JUnit logger (when one is registered) into a state where a replayed
+     * skipped/incomplete event is harmless, returning a restore callback -- or null when there
+     * is no JUnit logger, or its internals no longer match (the per-emit catch above then still
+     * turns a crash into the notice fallback). With its `prepared` flag set, the logger's
+     * handler only appends a <skipped/> element to `currentTestCase` -- pointed at a DETACHED
+     * decoy element, so the report is not touched -- and increments the current level's skipped
+     * counter, which is pre-seeded (the run is over; the counter is never written out). The
+     * report still records the test as passed -- the documented per-test reporting residual --
+     * but the run completes, the summary counts stay exact, and the report file is written.
+     */
+    private static function shieldJunitLogger(): ?callable
+    {
+        try {
+            $logger = JunitXmlCorrector::junitLogger();
+            if ($logger === null) {
+                return null;
+            }
 
-        self::pretendPrepared($previous);
+            $reflection = new \ReflectionObject($logger);
+            foreach (['document', 'prepared', 'currentTestCase', 'testSuiteSkipped', 'testSuiteLevel'] as $name) {
+                if (!$reflection->hasProperty($name)) {
+                    return null;
+                }
+            }
+
+            $document = (new \ReflectionProperty($logger, 'document'))->getValue($logger);
+            if (!$document instanceof \DOMDocument) {
+                return null;
+            }
+
+            $prepared        = new \ReflectionProperty($logger, 'prepared');
+            $currentTestCase = new \ReflectionProperty($logger, 'currentTestCase');
+            $skippedCounters = new \ReflectionProperty($logger, 'testSuiteSkipped');
+
+            $oldPrepared = $prepared->getValue($logger);
+            $oldCurrent  = $currentTestCase->getValue($logger);
+            $oldCounters = $skippedCounters->getValue($logger);
+            $level       = (new \ReflectionProperty($logger, 'testSuiteLevel'))->getValue($logger);
+
+            if (!is_bool($oldPrepared) || !is_array($oldCounters) || !is_int($level)) {
+                return null;
+            }
+
+            $counters         = $oldCounters;
+            $counters[$level] ??= 0;
+
+            $prepared->setValue($logger, true);
+            $currentTestCase->setValue($logger, $document->createElement('testcase'));
+            $skippedCounters->setValue($logger, $counters);
+
+            return static function () use ($logger, $prepared, $currentTestCase, $skippedCounters, $oldPrepared, $oldCurrent, $oldCounters): void {
+                $prepared->setValue($logger, $oldPrepared);
+                $currentTestCase->setValue($logger, $oldCurrent);
+                $skippedCounters->setValue($logger, $oldCounters);
+            };
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
