@@ -357,6 +357,7 @@ class Counit
             // verification counts its one assertion per mock natively. See MockExpectations.
             if (TimeLimit::enforcedForRun()
                 || OutputExpectations::disallowedForRun()
+                || VerdictSequencing::activeForRun()
                 || ($caller instanceof TestCase
                     && (ExceptionExpectations::isRegisteredFor($caller)
                         || $caller->expectsOutput()

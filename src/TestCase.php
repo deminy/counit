@@ -256,9 +256,14 @@ class TestCase extends BaseTestCase
             // runBare(), and only a joined body's output can be replayed into PHPUnit's buffer
             // in time (Swoole gives each coroutine its own output-buffer stack -- see
             // OutputCapture). The run serializes for the duration; see OutputExpectations.
+            // A run with a verdict-sequencing option active (--stop-on-*, --repeat, --retry)
+            // joins every test as well: PHPUnit decides between tests from the verdicts it has
+            // so far, and only a joined test's verdict is final before that decision. The run
+            // serializes for the duration; see VerdictSequencing.
             if (DependencyMap::isProducer(static::class, $this->name())
                 || TimeLimit::enforcedForRun()
                 || OutputExpectations::disallowedForRun()
+                || VerdictSequencing::activeForRun()
                 || GlobalState::isBackedUp(static::class, $this->name())
                 || PostConditions::isCustomizedFor(static::class)) {
                 // The body will have fully run before this method returns, so PHPUnit's own

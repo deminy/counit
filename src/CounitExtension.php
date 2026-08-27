@@ -62,10 +62,15 @@ final class CounitExtension implements Extension
         GlobalState::initialize($configuration);
         OutputExpectations::initialize($configuration);
         UselessTests::initialize($configuration);
+        VerdictSequencing::initialize($configuration);
 
         if (Helper::isCoroutineFriendly()) {
             if (TimeLimit::enforcedForRun()) {
                 TimeLimit::announceSerializedRun();
+            }
+
+            if (VerdictSequencing::activeForRun()) {
+                VerdictSequencing::announceSerializedRun();
             }
 
             if (GlobalState::configBacksUpEveryTest()) {
