@@ -4,151 +4,65 @@ All notable changes to _counit_ are documented here. Each entry mirrors the corr
 [GitHub release](https://github.com/deminy/counit/releases); the hashes in parentheses identify the commits that made
 each change.
 
-Two release series are maintained in parallel: the **1.0.x** series targets PHPUnit ~12.5.24 / ~13.0, while the
-**0.2.x** series is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v` prefix.
+Two release series are maintained in parallel: the **1.x** series (branch `master`) targets PHPUnit ~12.5.24 /
+~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
+prefix.
 
-## Unreleased
+## 1.1.0 - 2026-08-27
+
+A compatibility release: where a counit run used to diverge from a plain PHPUnit run, it now matches. Supported
+versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1) and no test needs changing. Feature-by-feature
+detail lives in [`docs/compatibility.md`](docs/compatibility.md).
+
+**Upgrade note.** Checks that used to stay silent under Swoole now report, so a suite that passed under 1.0.x may
+legitimately fail under 1.1.0 — a post-yield deprecation/warning/notice, a post-yield skip, and the "did not perform
+any assertions" risky check are all counted now, `--fail-on-*` included. Each report matches what plain PHPUnit says
+about the same test. `--enforce-time-limit`, the global-state backup settings and the `--stop-on-*` family serialize
+the run in exchange for exact semantics.
 
 ### Added
 
-- **`tearDown()` and `#[After]` methods now observe a finished test body in the automatic approach.** Under Swoole,
-  PHPUnit used to invoke the after-test hooks as soon as the test body first yielded — potentially while the body was
-  still running, so a `tearDown()` closing a connection or truncating tables could sabotage its own test. PHPUnit's
-  final `runBare()` offers no seam for this phase, so counit now takes the hooks over: it suppresses PHPUnit's own
-  invocation (through PHPUnit's cached hook collections) and runs the same hooks, in the same order, with the same
-  `afterTestMethod*` events, inside the test's coroutine right after the body, pass or fail. Existing test suites
-  need no changes. Differences that remain: the hooks run after PHPUnit has already reported the test's result, and a
-  throwing `tearDown()` is reported in the failure block after the summary with exit code 1 instead of marking its
-  test errored — deliberately so, since rethrowing it into the test-body path would let PHPUnit match it against the
-  test's `expectException()` expectation and falsely pass the test. Should a future PHPUnit release change the
-  internals involved, counit leaves PHPUnit's own (too early) hook timing untouched and prints a once-per-class
-  notice (silence with `COUNIT_SILENCE_TEARDOWN_NOTICE=1`) — loud degradation, never silent.
-- **`TestCase::tearDownCoroutine()` and `Counit::defer()`: additional cleanup homes that observe a finished test
-  body.** Automatic-approach tests can override `tearDownCoroutine()`, which runs inside the test's coroutine,
-  strictly after the body, pass or fail, before the relocated `tearDown()`/`#[After]` hooks (and at the same point in
-  blocking mode, including in the child process of a process-isolated test); any test can register cleanup with
-  `Counit::defer(callable)`, run in reverse registration order right after the wrapped callable — the manual
-  approach's only option, since counit is not in charge of its test lifecycle. A cleanup failure after the body has
-  yielded is reported at the end of the run and forces exit code 1.
-- **`#[Depends]` (and its variants) now works with exact PHPUnit semantics in the automatic approach.** A dependent
-  test used to receive `NULL` instead of the producer's return value — unconditionally, even for a producer that
-  never yields, because counit's `invokeTestMethod()` discarded the body's return value — and a producer that failed
-  only after a yield was already recorded as passed, so its dependents ran anyway (the failure surfaced only in the
-  deferred end-of-run block). PHPUnit resolves a dependent's input and skip decision before any seam counit owns, so
-  the only correct fix is on the producer's side: counit now builds the reverse dependency graph up front (from the
-  `TestSuite\Loaded` event, using PHPUnit's own dependency metadata) and *joins* the coroutine of every test
-  something depends on — `invokeTestMethod()` returns the body's real value and rethrows its real failure, so
-  PHPUnit natively records the right result, forwards it (deep/shallow clone variants included, `#[DependsExternal]`
-  across classes, `#[DependsOnClass]` for whole classes), and skips dependents of a failed producer exactly as in
-  blocking mode. Only the joined producer loses its own concurrency — its dependents could never have overlapped
-  with it anyway — while every unrelated test keeps overlapping, including during the wait: a dependency chain runs
-  in its blocking-mode duration, nothing else slows down. A joined producer's `tearDown()`/`#[After]` hooks are
-  also handed back to PHPUnit's native invocation — with the body complete, the native timing is correct again — so
-  a throwing `tearDown()` errors the producer (and skips its dependents) exactly as in blocking mode, instead of
-  surfacing in the deferred end-of-run block. The new `Counit::createAndJoin()` offers the same run-to-completion
-  semantics to manual-approach producers. (A producer using a data provider still passes `NULL` — plain PHPUnit
-  refuses to record return values for those; upstream behavior.)
-
-- **`expectException()` and friends now work when the expected exception is thrown only after a yield.** PHPUnit
-  verifies an exception expectation the moment the test-method invocation returns — under counit, the body's first
-  yield: too early, so such a test failed prematurely with "exception ... is thrown" while the real Throwable arrived
-  later and could only be reported as a deferred end-of-run duplicate (with the wrong failure text even for a throw
-  that would have matched). Because the expectation is declared inside the body — it does not exist yet when the
-  coroutine is spawned — `Counit::create()` now checks for a registered expectation once the body has run to its
-  first yield and, finding one, *joins* the coroutine (the `#[Depends]` producer mechanism reapplied): the real
-  Throwable is rethrown synchronously into PHPUnit's native verification, so match, mismatch, and never-thrown all
-  report exactly as in blocking mode, for every expectation flavor (message/code/messageMatches/exceptionObject) and
-  in both approaches — the manual approach needs no test changes, since its expectations are declared before
-  `Counit::create()` is even called. No assertion credit is applied on the join path (the verification counts its
-  own assertions natively), and a joined test's after-test hooks are handed back to PHPUnit's native invocation —
-  which runs strictly after the verification, guaranteeing a `tearDown()` throwing the very class the test expects
-  errors the test instead of falsely satisfying the expectation. Only expectation-carrying tests that yield lose
-  their own concurrency. The expectation detection reads PHPUnit's internal state (kept in two different shapes
-  across PHPUnit 12.5 and 13, both covered); on any future internals change counit prints a once-per-run notice and
-  degrades to the previous behavior. Remaining limitation (documented): an expectation declared only after the
-  test's first yield is invisible at the join decision and keeps the old behavior.
+- **Verdicts reached after a test's first yield are PHPUnit's own again.** Failures and errors, skips and
+  incompletes, risky verdicts and converted diagnostics are replayed through PHPUnit's events once every coroutine
+  has drained, so summaries, listings, exit codes and the JUnit report match a blocking run. A post-yield
+  `E_USER_ERROR`, which used to kill the run with exit code 255, now errors its test. (6bf1ab5, 9cc1a3b, 88da440,
+  7fad7af, c78b4ad)
+- **Expectations and test doubles work when the interesting thing happens after a yield**: `expectException()` and
+  friends, `expectOutputString()`/`expectOutputRegex()`, and mock `->expects(...)` verification — the last of which
+  used to *silently* pass a violated `never()`. Such tests are joined at their first yield; everything else keeps
+  running concurrently. (01f853c, 33c98b8, a1b0cb8)
+- **The test lifecycle observes a finished body.** `tearDown()`/`#[After]` hooks run after the body instead of at
+  its first yield, `assertPostConditions()`/`#[PostCondition]` see a finished test, and `tearDownCoroutine()` /
+  `Counit::defer()` offer body-ordered cleanup homes. (8caa214, 274dee1, 1db358c)
+- **`#[Depends]` and its variants have exact semantics**: dependents receive the producer's real return value and
+  are skipped when it fails, even after a yield. (1a64cb1, 94cd806, f5cbf24)
+- **Runner options behave as documented**: `--enforce-time-limit` times the real test, the global-state backup
+  attributes isolate what they should, the `--stop-on-*` family (plus `--repeat`/`--retry`) sequences verdicts
+  correctly, and invocations that run no tests (`--version`, `--help`, `--list-*`, bad input) exit like plain
+  PHPUnit instead of dying with 255. The first three serialize the run while active. (c0acef9, ba76648, 889d637,
+  49f32b9)
+- **Reporting is accurate**: aggregate code coverage no longer loses post-yield lines, the result cache records
+  real defects and durations, and the JUnit report carries corrected per-test counts, durations and verdicts.
+  (75b7c8e, 9f22e8b, d8d7ab1)
 
 ### Bug fixes
 
-- **Correct the assertion counts in the JUnit XML report.** The report's per-testcase `assertions` attributes are
-  captured from the `Test\Finished` events, so under Swoole they carried the up-front assertion credit — one extra
-  assertion on every automatic-approach test, even in fully synchronous suites — missed assertions counted directly
-  on the test object after a yield, and attributed assertions performed after a yield to whatever test's counting
-  window happened to be open; the suite-level aggregates were skewed accordingly, while the CLI summary was already
-  corrected. counit now attributes every increment of PHPUnit's shared assertion counter to the test that performed
-  it (segment accounting: Swoole's scheduling is cooperative, so between two of counit's observation points — test
-  coroutine start/end, `Counit::sleep()`, and per-namespace `sleep()`/`usleep()` shims that make the automatic
-  approach's raw sleep calls observable — every increment belongs to the running test) and rewrites the report
-  before the JUnit logger flushes it (the logger buffers one document and only writes at `ExecutionFinished`, after
-  counit's own subscriber has run), recomputing every testsuite aggregate from its corrected testcases. The
-  per-testcase numbers now match a blocking run exactly whenever every yield is observable; a yield counit cannot
-  observe (hooked network IO, a fully-qualified `\sleep()` call, a test class in the global namespace) leaves that
-  test's count too low — never another test's too high. A testcase element whose test never emitted
-  `Test\Finished` (e.g. skipped from `setUp()`) is left exactly as PHPUnit wrote it, matched by class and name
-  rather than position. With Swoole's preemptive scheduler enabled, segment accounting is switched off and the
-  correction falls back to `emitted − credit + late instance counts`. On any unexpected PHPUnit-internals change
-  the report is left as PHPUnit produced it.
-
-- **Stop failing the run for a skip/incomplete signalled after the test's first yield.** A `markTestSkipped()` or
-  `markTestIncomplete()` call made after the test's coroutine had already yielded was queued as a deferred *failure*:
-  the run printed it in the failure block and exited 1, even though plain PHPUnit exits 0 for skipped/incomplete
-  tests. The test's status itself cannot be restored — PHPUnit reported the test as passed at its first yield — but a
-  skip must not fail the run. Such Throwables (anything implementing PHPUnit's `SkippedTest`/`IncompleteTest`
-  interfaces) are now collected separately and printed as an end-of-run notice, without touching the exit code. A
-  skip requested before the first yield keeps working exactly as under PHPUnit.
-
-- **Stop losing assertions counted directly on the test object after its first yield.** PHPUnit counts most
-  assertions through `Assert`'s static counter, which counit's credit+residue correction reconciles exactly — but an
-  `addToAssertionCount()` call writes to the test object directly, bypassing that counter. Made from code that runs
-  after the test's coroutine has yielded — the body's tail after a `sleep()`/IO call, a relocated `tearDown()` or
-  `#[After]` hook, `tearDownCoroutine()`, or a `Counit::defer()` callback — the count landed on the test object after
-  PHPUnit had already reported the test, and silently vanished from the run's total while the run still exited 0.
-  counit now records the count PHPUnit reports for each test (via a `Test\Finished` subscriber) and the test's final
-  count once its coroutine has fully finished, and adds the difference back in the end-of-run correction:
-  `true total = reported − credits + residue + late instance counts`. Mock `->expects()` verification was never
-  affected on this branch — it runs before the test is reported and is counted exactly (new compatibility tests pin
-  that down for both approaches); a mock satisfied only after a yield remains a documented limitation.
-
-- **Stop losing `tearDown()`/`#[After]` hooks for a test whose `setUp()` throws or skips.** The relocated hooks only
-  replay inside a test's coroutine, but a test aborted during preparation — `setUp()` or another before-test hook
-  threw or skipped — never starts one, so with the native invocation suppressed its after-test hooks simply never
-  ran (blocking PHPUnit runs them: a failed `setUp()` does not cancel `tearDown()`). counit now detects the aborted
-  preparation through the test's verdict event — which `runBare()` emits *before* its native after-test hook phase —
-  and restores the class's original hook list right there, so PHPUnit runs the real hooks itself: natively,
-  synchronously, with its exact blocking semantics (a Throwable from `tearDown()` is swallowed when the test already
-  errored, and errors a test whose `setUp()` merely skipped). The class's next test re-suppresses the hooks through
-  the existing lazy takeover.
-
-- **Stop dropping a skip signalled from a relocated `tearDown()`/`#[After]` hook.** Blocking PHPUnit turns a
-  `markTestSkipped()` call made in an after-test hook into a test **failure** (`SkippedWithMessageException` is an
-  `AssertionFailedError` to `runBare()`'s tearDown-phase handling) — it never becomes a skip. counit used to discard
-  the signal entirely: the test stayed passed and the run exited 0. The skip is now routed through the same deferred
-  path as a throwing hook — reported in the failure block after the summary, forcing exit code 1 — while mirroring
-  PHPUnit's own loop shape: the skip stops neither the remaining hooks nor emits a failed-hook event, and a later
-  hook's Throwable takes precedence over it. (A joined `#[Depends]` producer and a test whose `setUp()` aborted are
-  unaffected: their hooks run natively, so such a skip fails the test itself, exactly as under PHPUnit.)
-
-- **Support `#[DoesNotPerformAssertions]` and `expectNotToPerformAssertions()` in both approaches.** Every test used
-  to be credited one assertion up front (to suppress the "did not perform any assertions" warning for assertions that
-  run after a sleep/IO yield), which made PHPUnit flag any test declaring it performs no assertions as risky ("This
-  test is not expected to perform assertions but performed 1 assertion"). `Counit::create()` now applies the credit
-  only after the test body has run up to its first yield, and declines it for a test that declares — through the
-  attribute (at method or class level), or a call in `setUp()` or at the top of the test body — that it performs no
-  assertions. Such tests now report clean with zero assertions, identical to blocking mode; run totals remain exact.
-  Two consequences worth noting: `Counit::create()`'s `$count` argument is now a request the library declines for such
-  tests, and a manual-approach test whose callable throws before its first yield is no longer credited, so under
-  `failOnRisky` it may newly report "did not perform any assertions" — matching what plain PHPUnit already reported.
-  Remaining limitation (documented in the README): a test declaring no assertions but performing one only after a
-  yield is not flagged risky under counit, since the risky verdict is rendered at the first yield.
+- **`--log-junit` combined with a post-yield skip killed the run** (exit code 255, zero-byte report). (e459567)
+- **Only one failing repetition was reported under `--repeat`**; each occurrence now gets its own entry. (4f3a90f,
+  4902866)
+- **Assertions counted on the test object after its first yield were lost** from the run's total. (eb4b3f5)
 
 ### Changes
 
-- **Renamed the two test-adaptation approaches**: the "global" style is now the **automatic approach**, and the
-  "case by case" style is now the **manual approach**. The test suites and sample directories were renamed to match
-  (`--testsuite global` → `--testsuite automatic`, `--testsuite case-by-case` → `--testsuite manual`;
-  `tests/unit/global/` → `tests/unit/automatic/`, `tests/unit/case-by-case/` → `tests/unit/manual/`). No PHP API
-  changed — `Deminy\Counit\TestCase`, `Counit::create()`, and `Counit::sleep()` all keep their names, so no changes
-  are needed in consumer projects.
+- **Renamed the two test-adaptation approaches**: the "global" style is now the **automatic approach** and the "case
+  by case" style the **manual approach**, with the test suites and sample directories renamed to match
+  (`--testsuite global` → `--testsuite automatic`, `tests/unit/global/` → `tests/unit/automatic/`, and likewise for
+  the manual one). No PHP API changed, so consumer projects need no edits. (9397f6d)
+- **The compatibility documentation moved to [`docs/compatibility.md`](docs/compatibility.md)**, leaving README.md a
+  short section and a link. (ba9f057, 17c3a9a)
+- **Modernized the codebase for the PHP 8.3 floor.** (2d3a23b)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.0.2...1.1.0
 
 ## 1.0.2 - 2026-07-27
 
@@ -213,6 +127,62 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.0 - 2026-08-27
+
+Feature release for the PHPUnit 8/9 maintenance series, bringing it in step with what the 1.x line learned about
+running a suite concurrently. Supported versions are unchanged (PHPUnit ~8.0 / ~9.0 on PHP >= 7.2) and no test needs
+changing; [`docs/compatibility.md`](docs/compatibility.md) has the feature-by-feature detail.
+
+**Upgrade note.** Checks that used to stay silent under Swoole now report, so a suite that passed under 0.2.3 may
+legitimately fail under 0.3.0. The sharpest case: a deprecation, warning or notice triggered after a test's first
+yield reached no handler at all, so the test silently passed and the run exited 0 where plain PHPUnit errors it and
+exits 2. Post-yield failures, skips and risky verdicts are likewise reported instead of swallowed, and a run whose
+only failure sat in the deferred block no longer exits 0. `--enforce-time-limit`, the `@backupGlobals` family and
+the `--stop-on-*` options serialize the run in exchange for exact semantics.
+
+### Added
+
+- **Verdicts reached after a test's first yield are recorded again.** Failures, errors, skips, incompletes, risky
+  verdicts and converted diagnostics are replayed into the run's `TestResult` after the drain, so summaries,
+  listings, exit codes and the JUnit report match a blocking run — retiring this line's old "deferred block plus
+  exit 1" reporting for hook throws, mock violations and diagnostics alike. (2f7e05f, 0a82d37, 1948bf5, ad8a249)
+- **Expectations and test doubles work when the interesting thing happens after a yield**: `expectException()` and
+  friends (PHPUnit 9's `expectWarning()` family included), `expectOutputString()`/`expectOutputRegex()`, and mock
+  `->expects(...)` verification — on PHPUnit 8/9 even a matcher-less stub lost its `willReturn()` configuration at
+  the first yield. (7bfa59f, 0b73966, 588d1a4)
+- **`@depends` (all forms) has exact semantics**, including cross-class `Class::method`, the `clone`/`shallowClone`
+  variants and `Class::class` (PHPUnit >= 9.3). (82b1bcc)
+- **Runner options behave as documented**: `--enforce-time-limit` times the real test, `@backupGlobals` /
+  `@backupStaticAttributes` isolate what they should, `assertPostConditions()`/`@postCondition` see a finished body,
+  the `--stop-on-*` family sequences verdicts correctly, `--fail-on-*` is honored, and invocations that run no tests
+  exit like plain PHPUnit instead of dying with 255. (d4f1a55, 004ef0b, 5a4e8c3, 91f679b, 37d0b66, 634aa79)
+- **Reporting is accurate**: aggregate code coverage no longer loses post-yield lines, the result cache and the
+  JUnit report carry real durations, and per-testcase assertion counts are corrected. (6633661, 558b854, d47d7cc)
+- **`@doesNotPerformAssertions` and `expectNotToPerformAssertions()`** are supported in both approaches. (4c73a4c)
+
+### Bug fixes
+
+- **A failing run could exit 0**: the exit-code alignment ran after the deferred-failure check and reset its forced
+  exit code, so a failure that lived only in that block was reported green. (99a24a2)
+- **Every failing run exited 255 on PHPUnit 8.0**, through a shutdown fatal in that same alignment. (e6634ac)
+- **Assertions counted on the test object after its first yield were lost** from the run's total. (b6f837f)
+- **A late skip or `--repeat` could hang or corrupt shared test objects**; `--repeat` now runs in blocking mode.
+  (ea54baa)
+
+### Changes
+
+- **Renamed the two test-adaptation approaches** to **automatic** and **manual**, matching the 1.x line, with the
+  test suites and sample directories renamed to match (`--testsuite global` → `--testsuite automatic`,
+  `tests/unit/global/` → `tests/unit/automatic/`, and likewise for the manual one). No PHP API changed. (e249a43)
+
+### Housekeeping
+
+- Regression suites for every behavior above run across the full support matrix (PHPUnit ~8.0.0, ~8.0, ~9.0.0, ~9.0
+  on PHP 7.4 and 8.2), with and without Swoole; static analysis upgraded to PHPStan ^2.0; the compatibility
+  documentation moved to [`docs/compatibility.md`](docs/compatibility.md). (810fd12, 801aee9)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.2.3...0.3.0
 
 ## 0.2.3 - 2026-07-27
 
