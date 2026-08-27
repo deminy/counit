@@ -124,8 +124,31 @@ if (extension_loaded('swoole') && !$repeatRequested) {
 
     $code = 0;
     Swoole\Coroutine\run(function () use (&$code): void {
-        $code = PHPUnit\TextUI\Command::main(false);
-        Swoole\Timer::clearAll();
+        try {
+            $code = PHPUnit\TextUI\Command::main(false);
+        } catch (\Throwable $e) {
+            // PHPUnit finishes many invocations by calling exit() directly instead of returning
+            // from Command::main(false): --version/--help, an unknown option, a missing test
+            // file or configuration ("Cannot open file ..."), and their kin. Swoole intercepts
+            // exit() inside a coroutine and throws a Swoole\ExitException instead -- which
+            // PHPUnit's own Command wraps in a TextUI RuntimeException on its way out, so the
+            // chain is searched for it. Without the catch, the exception escaped the coroutine
+            // and killed the run with a raw fatal backtrace and exit code 255 -- ./counit
+            // --version alone died that way. The message PHPUnit printed before the exit is
+            // intact, so honoring the intercepted status makes these invocations byte-identical
+            // to plain PHPUnit. Anything else is rethrown untouched.
+            $exitException = $e;
+            while ($exitException !== null && !$exitException instanceof Swoole\ExitException) {
+                $exitException = $exitException->getPrevious();
+            }
+            if ($exitException === null) {
+                throw $e;
+            }
+            $status = $exitException->getStatus();
+            $code   = is_int($status) ? $status : 255;
+        } finally {
+            Swoole\Timer::clearAll();
+        }
     });
 
     // Counit::create() (used directly by manual-approach tests, and by

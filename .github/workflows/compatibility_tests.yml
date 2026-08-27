@@ -696,6 +696,31 @@ jobs:
           }
           JSON
 
+      - name: Test No-Test Invocations
+        # PHPUnit finishes --version/--help, unknown options and missing test files by calling
+        # exit() directly instead of returning from Command::main(false). Inside the counit
+        # script's coroutine, Swoole intercepts that exit() and throws -- the run used to die
+        # with a raw fatal backtrace and exit code 255 (./counit --version alone did). The
+        # script now unwraps the intercepted exit status (see counit), making these invocations
+        # byte-identical to plain PHPUnit. The missing-file leg is PHPUnit 9 only: 8.0 fatals on
+        # a missing file upstream, in plain PHPUnit and counit alike.
+        run: |
+          rc=0; ./counit --version > /tmp/nt.log 2>&1 || rc=$?
+          cat /tmp/nt.log
+          test "$rc" -eq 0
+          grep -qF 'PHPUnit' /tmp/nt.log
+          ! grep -qF 'Fatal error' /tmp/nt.log
+          rc=0; ./counit --bogus-option > /tmp/nt.log 2>&1 || rc=$?
+          test "$rc" -eq 1
+          ! grep -qF 'Fatal error' /tmp/nt.log
+          if ./vendor/bin/phpunit --version | grep -q 'PHPUnit 9'; then
+            rc=0; ./counit tests/regression/NoSuchTest.php > /tmp/nt.log 2>&1 || rc=$?
+            cat /tmp/nt.log
+            test "$rc" -eq 1
+            grep -qF 'Cannot open file' /tmp/nt.log
+            ! grep -qF 'Fatal error' /tmp/nt.log
+          fi
+
       - name: Test Result Cache And Duration Corrections
         # The result cache's defects are exact under Swoole since the deferred-verdict replays
         # (they notify the cache's listener adapter, which persists only after counit's hook),
