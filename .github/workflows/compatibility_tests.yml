@@ -592,6 +592,32 @@ jobs:
             grep -qF 'This test did not perform any assertions' /tmp/useless.log
           fi
 
+      - name: Test Verdict-Sequencing Options
+        # The --stop-on-* family makes PHPUnit decide BETWEEN tests from the verdicts it has so
+        # far -- but under counit a post-yield verdict used to exist only after the whole loop
+        # had finished: --stop-on-failure never stopped. While any of these options is active,
+        # counit now joins every test at its first yield (see VerdictSequencing; serialized run,
+        # STDERR notice), so each verdict is final before the next scheduling decision and the
+        # expected output is identical with and without Swoole. (--repeat already runs in
+        # blocking mode on this branch; --retry does not exist on PHPUnit 8/9.)
+        run: |
+          rc=0
+          ./counit -c phpunit.xml.dist --stop-on-failure tests/regression/StopOnFailureTest.php > /tmp/vs.log 2> /tmp/vs.err || rc=$?
+          cat /tmp/vs.log /tmp/vs.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 1, Assertions: 2, Failures: 1.' /tmp/vs.log
+          if php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'verdict-sequencing option' /tmp/vs.err
+          fi
+          rc=0
+          ./counit -c phpunit.xml.dist --stop-on-skipped tests/regression/LateSkipTest.php > /tmp/vs.log 2> /dev/null || rc=$?
+          test "$rc" -eq 0
+          grep -qF 'Tests: 1, Assertions: 0, Skipped: 1.' /tmp/vs.log
+          rc=0
+          ./counit -c phpunit.xml.dist --stop-on-risky tests/regression/UselessTestTest.php > /tmp/vs.log 2> /dev/null || rc=$?
+          test "$rc" -eq 0
+          grep -qF 'Tests: 1, Assertions: 0, Risky: 1.' /tmp/vs.log
+
       - name: Test JUnit XML Assertion Counts
         # The JUnit report's per-testcase `assertions` attributes are read from each test object as
         # PHPUnit reports it, so under Swoole they used to carry the up-front assertion credit (one

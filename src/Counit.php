@@ -204,6 +204,11 @@ class Counit
             // credit would inflate that count and mask the risky "did not perform any
             // assertions" verdict blocking PHPUnit gives in those runs.
             $joinForTimeLimit    = TimeLimit::enforcedForRun($caller instanceof TestCase ? $caller : null);
+            // A run with a verdict-sequencing option active (--stop-on-*) joins every test as
+            // well: PHPUnit decides between tests from the verdicts it has so far, and only a
+            // joined test's verdict is final before that decision. The run serializes for the
+            // duration; see VerdictSequencing.
+            $joinForSequencing   = VerdictSequencing::activeForRun($caller instanceof TestCase ? $caller : null);
             $joinForGlobalState  = $caller instanceof TestCase && GlobalState::isBackedUp($caller);
             // Scoped to the manual approach on purpose: the automatic approach's own
             // create(parent::runBare()) call runs the whole phase inside the coroutine already --
@@ -413,11 +418,11 @@ class Counit
             // for a non-TestCase caller before the spawn) but kept for the narrowing and as
             // documentation of the invariant.
             if ($count > 0 && $caller instanceof TestCase && !$finished // @phpstan-ignore instanceof.alwaysTrue
-                && !$joinForTimeLimit && !$joinForGlobalState && !$joinForPostConditions) {
+                && !$joinForTimeLimit && !$joinForSequencing && !$joinForGlobalState && !$joinForPostConditions) {
                 self::creditAssertionCount($caller, $count);
             }
 
-            if ($joinForTimeLimit || $joinForGlobalState || $joinForPostConditions || $joinForOutput || $joinForMocks || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
+            if ($joinForTimeLimit || $joinForSequencing || $joinForGlobalState || $joinForPostConditions || $joinForOutput || $joinForMocks || ($caller instanceof TestCase && ExceptionExpectations::isRegisteredFor($caller))) {
                 self::$lastCreateJoined = true;
                 $joining                = true;
                 Attribution::suspended();
