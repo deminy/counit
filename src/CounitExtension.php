@@ -175,6 +175,12 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
             // alignment -- the --fail-on-risky exit code.
             UselessTests::emitDeferred();
 
+            // The result cache's defects are already exact (the replays above notify its
+            // listener adapter, and it persists only after this hook); its times still hold
+            // time-to-first-yield, so they are overwritten with the measured wall-clock
+            // durations before that persist. See HistoryCorrector.
+            HistoryCorrector::correct();
+
             JunitXmlCorrector::correct();
 
             $this->correctAssertionCount(

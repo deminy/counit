@@ -696,6 +696,54 @@ jobs:
           }
           JSON
 
+      - name: Test Result Cache And Duration Corrections
+        # The result cache's defects are exact under Swoole since the deferred-verdict replays
+        # (they notify the cache's listener adapter, which persists only after counit's hook),
+        # and its times -- once time-to-first-yield, 0 for a sleeping test -- are overwritten
+        # with measured wall-clock durations, as are the JUnit `time` attributes (see
+        # HistoryCorrector / JunitXmlCorrector). Expected content is identical with and without
+        # Swoole: the three post-yield defects present, the passing test absent from the
+        # defects, and every duration of this 0.2s-sleeping fixture at least 0.1s. PHPUnit 8
+        # serializes the cache as an object where 9 writes JSON, so its leg asserts textually.
+        run: |
+          rm -f /tmp/rc.cache
+          rc=0
+          ./counit -c phpunit.xml.dist --cache-result --cache-result-file=/tmp/rc.cache --log-junit /tmp/rc.xml tests/regression/LateFailureTest.php > /dev/null 2>&1 || rc=$?
+          test "$rc" -eq 2
+          test -s /tmp/rc.cache
+          php -r '
+              $d = new DOMDocument();
+              if (!$d->load("/tmp/rc.xml")) { exit(1); }
+              foreach ($d->getElementsByTagName("testcase") as $testCase) {
+                  if ((float) $testCase->getAttribute("time") < 0.1) { exit(1); }
+              }
+          '
+          if ./vendor/bin/phpunit --version | grep -q 'PHPUnit 9'; then
+            php -r '
+                $prefix = "Deminy\\Counit\\Tests\\LateFailureTest::";
+                $cache  = json_decode((string) file_get_contents("/tmp/rc.cache"), true);
+                $defects = $cache["defects"] ?? [];
+                $times   = $cache["times"] ?? [];
+                exit((int) !(
+                    isset($defects[$prefix . "testFailsAfterYield"])
+                    && isset($defects[$prefix . "testErrorsAfterYield"])
+                    && isset($defects[$prefix . "testDataSetFailsAfterYield with data set \"failing set\""])
+                    && !isset($defects[$prefix . "testPassesAfterYield"])
+                    && ($times[$prefix . "testPassesAfterYield"] ?? 0) >= 0.1
+                    && ($times[$prefix . "testFailsAfterYield"] ?? 0) >= 0.1
+                ));
+            '
+          else
+            grep -qF 'testFailsAfterYield' /tmp/rc.cache
+            php -r '
+                preg_match_all("/d:([0-9.]+);/", (string) file_get_contents("/tmp/rc.cache"), $m);
+                if ($m[1] === []) { exit(1); }
+                foreach ($m[1] as $time) {
+                    if ((float) $time < 0.1) { exit(1); }
+                }
+            '
+          fi
+
       - name: Test Aggregate Code Coverage
         # Under Swoole, essentially all post-yield test code runs during counit's end-of-run
         # drain -- outside every per-test coverage window -- so the aggregate report used to lose

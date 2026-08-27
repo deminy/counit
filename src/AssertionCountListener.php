@@ -262,6 +262,10 @@ class AssertionCountListener implements TestListener
             }
 
             Attribution::testStarting(spl_object_id($test));
+            // Wall-clock stamp for the test's real duration (PHPUnit's own telemetry only sees
+            // time-to-first-yield for a non-joined test); see Counit::recordTestStarting() and
+            // HistoryCorrector.
+            Counit::recordTestStarting(spl_object_id($test));
         }
     }
 

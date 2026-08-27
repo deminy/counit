@@ -70,7 +70,8 @@ class JunitXmlCorrector
 
             // Stage every change first, then write: nothing below can realistically throw, but a
             // half-corrected report would be worse than an uncorrected one.
-            $corrections = [];
+            $corrections     = [];
+            $timeCorrections = [];
 
             foreach ($document->getElementsByTagName('testcase') as $testCase) {
                 if (!$testCase->hasAttribute('class') || !$testCase->hasAttribute('assertions')) {
@@ -89,10 +90,23 @@ class JunitXmlCorrector
                 if ($corrected !== null) {
                     $corrections[] = [$testCase, $corrected];
                 }
+
+                // The logger's `time` attribute measured the test's report boundary, which for
+                // a non-joined test is time-to-first-yield (0.001s for a 1s test); replace it
+                // with the coroutine's measured wall-clock duration -- approximately what a
+                // blocking run reports. See Counit::recordTestDuration().
+                $duration = Counit::durationForKey($key);
+                if ($duration !== null && $testCase->hasAttribute('time')) {
+                    $timeCorrections[] = [$testCase, $duration];
+                }
             }
 
             foreach ($corrections as $correction) {
                 $correction[0]->setAttribute('assertions', (string) $correction[1]);
+            }
+
+            foreach ($timeCorrections as $correction) {
+                $correction[0]->setAttribute('time', sprintf('%F', $correction[1]));
             }
 
             self::writeDeferredVerdicts($document);
@@ -117,6 +131,18 @@ class JunitXmlCorrector
                         }
                     }
                     $testSuite->setAttribute($attribute, (string) $total);
+                }
+
+                // The time aggregate is only recomputed when a testcase time was actually
+                // rewritten (sums of per-test durations, blocking's own semantics -- under
+                // concurrency they overlap, so the sum exceeds the run's real wall time exactly
+                // as blocking's total would).
+                if ($timeCorrections !== [] && $testSuite->hasAttribute('time')) {
+                    $total = 0.0;
+                    foreach ($testSuite->getElementsByTagName('testcase') as $testCase) {
+                        $total += (float) $testCase->getAttribute('time');
+                    }
+                    $testSuite->setAttribute('time', sprintf('%F', $total));
                 }
             }
         } catch (\Throwable $e) {

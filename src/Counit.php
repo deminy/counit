@@ -119,6 +119,31 @@ class Counit
     private static $appliedCredits = [];
 
     /**
+     * Per test key: the hrtime(true) stamp taken when the test started (from the run's
+     * TestListener; create() stamps the first test itself, whose startTest() fired before the
+     * listener could be attached). Together with the coroutine-finish stamp this yields the
+     * test's real wall-clock duration -- what a blocking run would have measured -- where
+     * PHPUnit's own telemetry only ever sees time-to-first-yield for the automatic approach's
+     * report.
+     *
+     * @var array<int, int>
+     */
+    private static $testStartTimes = [];
+
+    /**
+     * Per test key: the test's TestCase object and measured wall-clock duration in seconds,
+     * recorded when its coroutine truly finishes. The maximum wins: a test may wrap several
+     * coroutines (manual approach), and the last one to finish defines the test's real end.
+     * Consumed by JunitXmlCorrector (the `time` attributes) and HistoryCorrector (the result
+     * cache's `times` map). Approximate under concurrency -- a coroutine also waits for its
+     * turn on the scheduler while others run -- but of blocking's magnitude, never the
+     * 0.001-for-a-1s-test garbage the raw telemetry records.
+     *
+     * @var array<int, array{test: TestCase, seconds: float}>
+     */
+    private static $testDurations = [];
+
+    /**
      * Whether the most recent create() call joined its coroutine because the calling test had an
      * exception expectation registered at the first yield. TestCase::runBare() consults this to
      * skip the up-front assertion credit for such a test: its body has fully finished, so the
@@ -254,6 +279,9 @@ class Counit
                 // its first call) -- nothing has yielded yet at that point, so the counter's
                 // whole current value belongs to this test and is claimed retroactively.
                 Attribution::claimMain($key);
+                // Same first-test rationale for the wall-clock stamp (a no-op for every later
+                // test, whose startTest() already stamped it); see recordTestStarting().
+                self::recordTestStarting($key);
             }
 
             $id = Coroutine::create(function () use ($callable, $caller, $key, $done, &$caught, &$alreadyReturned, &$finished, &$joining, &$thrown, $captureOutput, &$capturedOutput, &$outputLevelDelta, $description): void {
@@ -310,6 +338,11 @@ class Counit
                     }
 
                     $finished = true;
+
+                    if ($key !== null) {
+                        // A non-null $key implies a TestCase caller (see how $key is derived).
+                        self::recordTestDuration($key, $caller);
+                    }
 
                     Attribution::coroutineFinished();
                     Diagnostics::coroutineFinished();
@@ -685,6 +718,44 @@ class Counit
     }
 
     /**
+     * Stamps the start of a test's wall-clock window, unless one is already recorded for it.
+     * Called from AssertionCountListener::startTest() for every test the listener sees, and
+     * from create() for the first test of the run (whose startTest() fired before the listener
+     * could be attached -- nothing has yielded at that point, so the create() call is still at
+     * the test's start).
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function recordTestStarting(int $key): void
+    {
+        if (!isset(self::$testStartTimes[$key])) {
+            self::$testStartTimes[$key] = (int) hrtime(true);
+        }
+    }
+
+    /**
+     * The test's measured wall-clock duration in seconds, or null when none was recorded.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function durationForKey(int $key): ?float
+    {
+        return isset(self::$testDurations[$key]) ? self::$testDurations[$key]['seconds'] : null;
+    }
+
+    /**
+     * Every measured duration, keyed by test key; see $testDurations.
+     *
+     * @return array<int, array{test: TestCase, seconds: float}>
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function measuredDurations(): array
+    {
+        return self::$testDurations;
+    }
+
+    /**
      * A test whose body failed, skipped or went incomplete only after PHPUnit had already
      * reported it (see $deferredFailures/$deferredSkips). PHPUnit 8/9 exempt every
      * non-passing test from the "did not perform any assertions" check, so the deferred pass
@@ -696,6 +767,22 @@ class Counit
     {
         if ($key !== null) {
             UselessTests::markAborted($key);
+        }
+    }
+
+    /**
+     * Records the test's duration as of now; see $testDurations. The maximum wins.
+     */
+    private static function recordTestDuration(int $key, TestCase $test): void
+    {
+        if (!isset(self::$testStartTimes[$key])) {
+            return;
+        }
+
+        $seconds = ((int) hrtime(true) - self::$testStartTimes[$key]) / 1000000000;
+
+        if (!isset(self::$testDurations[$key]) || self::$testDurations[$key]['seconds'] < $seconds) {
+            self::$testDurations[$key] = ['test' => $test, 'seconds' => $seconds];
         }
     }
 }
