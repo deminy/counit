@@ -89,8 +89,14 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
-// Swoole is enabled? Then try to run unit tests in parallel using different coroutines!
-if (extension_loaded('swoole')) {
+// Swoole is enabled and this invocation actually runs tests? Then try to run them in parallel
+// using different coroutines! Invocations that run no tests -- --version/--help/--list-* style
+// CLI commands, unknown options, a missing test file or configuration file -- fall through to
+// the plain blocking branch at the bottom: PHPUnit finishes those by calling exit() directly,
+// which Swoole would intercept inside a coroutine (turning clean exits into a bogus "An error
+// occurred inside PHPUnit" block, exit code 255 and a raw fatal backtrace), while the blocking
+// branch reproduces plain PHPUnit byte for byte. See Helper::invocationRunsTests().
+if (extension_loaded('swoole') && Deminy\Counit\Helper::invocationRunsTests($_SERVER['argv'])) {
     Swoole\Coroutine::set(
         [
             // Swoole only honors hook flags configured before the coroutine scheduler starts, so
@@ -103,11 +109,28 @@ if (extension_loaded('swoole')) {
 
     $code = 0;
     Swoole\Coroutine\run(static function () use (&$code): void {
-        // PHPUnit 10 removed PHPUnit\TextUI\Command; PHPUnit\TextUI\Application::run() is the
-        // replacement. It returns the exit code instead of calling exit() itself, so it is safe
-        // to invoke inside a coroutine.
-        $code = (new PHPUnit\TextUI\Application())->run($_SERVER['argv']);
-        Swoole\Timer::clearAll();
+        try {
+            // PHPUnit 10 removed PHPUnit\TextUI\Command; PHPUnit\TextUI\Application::run() is the
+            // replacement. It returns the exit code instead of calling exit() itself, so it is
+            // safe to invoke inside a coroutine.
+            $code = (new PHPUnit\TextUI\Application())->run($_SERVER['argv']);
+        } catch (Swoole\ExitException $e) {
+            // PHPUnit bailed out through a direct exit() on a path the pre-flight routing above
+            // could not predict -- the class of exits discovered only after the CLI parse: a
+            // malformed or unreadable XML configuration, a missing bootstrap script, a
+            // test-suite <directory> that does not exist on disk, and their kin. Swoole
+            // intercepts exit() inside a coroutine and throws this instead; without the catch,
+            // the exception would escape the coroutine and kill the run with a raw fatal
+            // backtrace. Honor the exit status instead. (PHPUnit's catch-all has usually
+            // re-classified the original bail-out as an internal error by this point, so the
+            // status is its crash code, 255, and the output carries its crash block reading
+            // "Message: swoole exit" -- the clean message printed before the bail-out is intact
+            // either way.)
+            $status = $e->getStatus();
+            $code   = is_int($status) ? $status : 255;
+        } finally {
+            Swoole\Timer::clearAll();
+        }
     });
 
     // Counit::create() (used directly by manual-approach tests, and by
