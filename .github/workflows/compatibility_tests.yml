@@ -27,7 +27,9 @@ jobs:
           php-version: ${{ matrix.env.php }}
           tools: composer:v2
           extensions: ${{ matrix.extensions }}
-          coverage: none
+          # pcov powers the aggregate-coverage step below; it collects nothing unless a run
+          # requests coverage, so every other step is unaffected.
+          coverage: pcov
 
       - name: Install Dependencies
         run: composer install -nq --no-progress
@@ -679,3 +681,21 @@ jobs:
               "testAfterTheSkippedOne": "3"
           }
           JSON
+
+      - name: Test Aggregate Code Coverage
+        # Under Swoole, essentially all post-yield test code runs during counit's end-of-run
+        # drain -- outside every per-test coverage window -- so the aggregate report used to lose
+        # those lines silently (25% vs blocking's 62.5% on this very fixture). counit now
+        # opens one coverage window of its own around the drain (see Deminy\Counit\Coverage),
+        # making the aggregate match a blocking run exactly; the expected percentages are
+        # identical with and without Swoole. pcov.directory must be pointed at the fixture
+        # directory explicitly (its auto-detection instruments src/ only), and neverCalled()
+        # keeps the expected number below 100% so over-collection would be caught too.
+        run: |
+          set -o pipefail
+          php -d pcov.directory=tests/regression/support ./counit -c phpunit.xml.dist \
+            --coverage-filter tests/regression/support --coverage-text \
+            tests/regression/CoverageDrainTest.php | tee /tmp/coverage.log
+          grep -qF 'OK (3 tests, 6 assertions)' /tmp/coverage.log
+          grep -qF '66.66% (2/3)' /tmp/coverage.log
+          grep -qF '62.50% (5/8)' /tmp/coverage.log

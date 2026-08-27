@@ -244,11 +244,16 @@ final class CounitExtension implements Extension
                     // The drain is the main coroutine's longest yield of the run and the one
                     // most post-yield test code runs in; it does not go through Attribution's
                     // observation points, so counit's converting handler is put on the stack for
-                    // it here. See Diagnostics.
+                    // it here. See Diagnostics. For the same reason the drain runs outside every
+                    // per-test code-coverage window, so a coverage window of its own is opened
+                    // around it -- without one, every post-yield line silently vanishes from the
+                    // aggregate report. See Coverage.
                     Diagnostics::suspended();
+                    Coverage::startDrainWindow();
                     while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
                         Coroutine::sleep(0.2);
                     }
+                    Coverage::stopDrainWindow();
                     Diagnostics::resumed();
 
                     // Correct the run's reported assertion total. PHPUnit attributes assertions to
