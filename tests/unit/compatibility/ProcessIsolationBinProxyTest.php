@@ -69,11 +69,134 @@ class BinProxyProbeTest extends \PHPUnit\Framework\TestCase
 PHP
             );
 
-            // The same include shape Composer's generated bin proxy uses on PHP >= 8: the proxy is
-            // the entry script, and counit's real binary is the second entry in get_included_files().
+            // The same include shapes Composer's generated bin proxy uses (a trimmed copy of the
+            // real thing): on PHP >= 8 a plain include -- the proxy is the entry script, and
+            // counit's real binary lands as the second entry in get_included_files(), the exact
+            // shape whose replay this test pins. On PHP < 8 the plain include would be a fatal
+            // error (PHP only strips the "#!" shebang line of the MAIN script there; included, it
+            // becomes inline HTML ahead of the declare(strict_types=1) statement), so Composer
+            // includes through its shebang-stripping phpvfscomposer:// stream wrapper instead --
+            // whose entries PHPUnit's replay skips wholesale, which is why only the PHP >= 8
+            // plain-path shape ever leaked the binary into the child.
+            // (The closing marker is kept alone on its line, with the template in a variable: a
+            // marker followed by other characters is PHP 7.3+ syntax, and this branch lints on 7.2.)
+            $proxyTemplate = <<<'PHP'
+<?php
+
+namespace Composer;
+
+$binPath = %s;
+
+if (PHP_VERSION_ID < 80000) {
+    if (!class_exists('Composer\BinProxyWrapper')) {
+        /**
+         * @internal
+         */
+        final class BinProxyWrapper
+        {
+            private $handle;
+            private $position;
+            private $realpath;
+
+            public function stream_open($path, $mode, $options, &$opened_path)
+            {
+                // get rid of phpvfscomposer:// prefix for __FILE__ & __DIR__ resolution
+                $opened_path = substr($path, 17);
+                $this->realpath = realpath($opened_path) ?: $opened_path;
+                $opened_path = 'phpvfscomposer://' . $this->realpath;
+                $this->handle = fopen($this->realpath, $mode);
+                $this->position = 0;
+
+                return (bool) $this->handle;
+            }
+
+            public function stream_read($count)
+            {
+                $data = fread($this->handle, $count);
+
+                if ($this->position === 0) {
+                    $data = preg_replace('{^#!.*\r?\n}', '', $data);
+                }
+                $data = str_replace('__DIR__', var_export(dirname($this->realpath), true), $data);
+                $data = str_replace('__FILE__', var_export($this->realpath, true), $data);
+
+                $this->position += strlen($data);
+
+                return $data;
+            }
+
+            public function stream_cast($castAs)
+            {
+                return $this->handle;
+            }
+
+            public function stream_close()
+            {
+                fclose($this->handle);
+            }
+
+            public function stream_lock($operation)
+            {
+                return $operation ? flock($this->handle, $operation) : true;
+            }
+
+            public function stream_seek($offset, $whence)
+            {
+                if (0 === fseek($this->handle, $offset, $whence)) {
+                    $this->position = ftell($this->handle);
+
+                    return true;
+                }
+
+                return false;
+            }
+
+            public function stream_tell()
+            {
+                return $this->position;
+            }
+
+            public function stream_eof()
+            {
+                return feof($this->handle);
+            }
+
+            public function stream_stat()
+            {
+                return array();
+            }
+
+            public function stream_set_option($option, $arg1, $arg2)
+            {
+                return true;
+            }
+
+            public function url_stat($path, $flags)
+            {
+                $path = substr($path, 17);
+                if (file_exists($path)) {
+                    return stat($path);
+                }
+
+                return false;
+            }
+        }
+    }
+
+    if (
+        (function_exists('stream_get_wrappers') && in_array('phpvfscomposer', stream_get_wrappers(), true))
+        || (function_exists('stream_wrapper_register') && stream_wrapper_register('phpvfscomposer', 'Composer\BinProxyWrapper'))
+    ) {
+        return include "phpvfscomposer://" . $binPath;
+    }
+}
+
+return include $binPath;
+
+PHP;
             file_put_contents(
                 $proxy,
-                sprintf("<?php\n\nreturn include %s;\n", var_export(dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'counit', true))
+                sprintf($proxyTemplate, var_export(dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'counit', true))
             );
 
             [$exitCode, $output] = self::runCommandWithDeadline(
