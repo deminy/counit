@@ -89,6 +89,28 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
+// PHPUnit replays the parent's included files into every process-isolated child that preserves
+// global state (see PHPUnit\Util\GlobalState::processIncludedFilesAsString()). The replay drops the
+// entry script, but the only Composer bin proxy it special-cases is PHPUnit's own -- run through
+// vendor/bin/counit, the proxy is the entry script and THIS file is the second included file, so
+// without the registration below the child would re-execute the whole counit entry script, starting
+// a brand-new PHPUnit run inside the child instead of running its one isolated test (which can even
+// recurse: that run re-discovers the isolated test class and spawns children of its own). PHPUnit
+// honors $GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST'], compared with a strict in_array() against
+// the resolved paths get_included_files() returns, so register the resolved paths of both this file
+// and the entry script (identical -- and already dropped by PHPUnit -- when counit is invoked
+// directly); merge, so entries registered earlier (e.g. by a Composer-generated proxy) survive.
+// Only the entry script must be excluded: the Composer autoloader and counit's own classes are
+// still replayed, and with no coroutine in the child Helper::isCoroutineFriendly() returns false
+// there, so isolated tests keep their plain blocking PHPUnit behavior.
+$GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST'] = array_values(array_unique(array_merge(
+    (array) ($GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST'] ?? []),
+    array_filter([
+        __FILE__,
+        realpath($_SERVER['SCRIPT_FILENAME'] ?? ''),
+    ])
+)));
+
 // Swoole is enabled and this invocation actually runs tests? Then try to run them in parallel
 // using different coroutines! Invocations that run no tests -- --version/--help/--list-* style
 // CLI commands, unknown options, a missing test file or configuration file -- fall through to

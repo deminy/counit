@@ -42,7 +42,7 @@ jobs:
         run: |
           set -o pipefail
           ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (59 tests, 72 assertions)' /tmp/compatibility.log
+          grep -qF 'OK (60 tests, 74 assertions)' /tmp/compatibility.log
 
       - name: Test Unregistered-Extension Notice
         # Running without <bootstrap class="Deminy\Counit\CounitExtension"/> registered is a silent
