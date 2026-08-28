@@ -89,6 +89,36 @@ unset($options);
 
 require PHPUNIT_COMPOSER_INSTALL;
 
+// PHPUnit replays the parent's included files into every process-isolated child that preserves
+// global state (see PHPUnit\Util\GlobalState::processIncludedFilesAsString()) -- and on PHPUnit 8/9
+// preserveGlobalState defaults to TRUE, so every @runInSeparateProcess/@runTestsInSeparateProcesses/
+// --process-isolation test without "@preserveGlobalState disabled" takes that path. The replay drops
+// the entry script, but the only Composer bin proxy it special-cases is PHPUnit's own -- run through
+// vendor/bin/counit, the proxy is the entry script and THIS file is the second included file, so
+// without the registration below the child re-executes the whole counit entry script, starting a
+// brand-new PHPUnit run inside the child instead of running its one isolated test; that run
+// re-discovers the isolated test class and spawns children of its own, recursively -- the parent
+// blocks forever on a child's stdout and the run hangs, spawning processes without bound. PHPUnit
+// honors an exclude list here, compared against the resolved paths get_included_files() returns:
+// $GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST'] since PHPUnit 9.3, $GLOBALS['__PHPUNIT_ISOLATION_BLACKLIST']
+// before the rename (present since 8.0.0) -- register with both names, covering every supported
+// version. Both this file and the entry script are registered (identical -- and already dropped by
+// PHPUnit -- when counit is invoked directly); merge, so entries registered earlier (e.g. by a
+// Composer-generated proxy) survive. Only the entry script must be excluded: the Composer
+// autoloader and counit's own classes are still replayed, and with no coroutine in the child
+// Helper::isCoroutineFriendly() returns false there, so isolated tests keep their plain blocking
+// PHPUnit behavior.
+foreach (['__PHPUNIT_ISOLATION_EXCLUDE_LIST', '__PHPUNIT_ISOLATION_BLACKLIST'] as $isolationExcludeList) {
+    $GLOBALS[$isolationExcludeList] = array_values(array_unique(array_merge(
+        (array) ($GLOBALS[$isolationExcludeList] ?? []),
+        array_filter([
+            __FILE__,
+            realpath($_SERVER['SCRIPT_FILENAME'] ?? ''),
+        ])
+    )));
+}
+unset($isolationExcludeList);
+
 // PHPUnit's --repeat re-runs the very same TestCase objects. Under the coroutine runner the
 // repeated passes overlap -- a later pass starts while an earlier pass's coroutines are still
 // pending on their sleep/IO yields -- and the state those objects share (output-buffer
