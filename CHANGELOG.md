@@ -8,6 +8,25 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.2 - 2026-08-28
+
+Bug-fix release for the 1.x series. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on
+PHP >= 8.4.1), and no test or consumer project needs changing.
+
+### Bug fixes
+
+- **Process-isolated tests no longer break when counit runs through its Composer bin proxy** (`vendor/bin/counit` —
+  how every consumer invokes it). PHPUnit replays the parent's included files into a global-state-preserving
+  isolated child, dropping the entry script but special-casing only its *own* bin proxy — so counit's real binary,
+  the second included file behind the proxy, was re-executed in the child, and every such test errored with "Test
+  was run in child process and ended unexpectedly". The `counit` script now registers its paths in
+  `$GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST']`; the autoloader and counit's classes still reach the child, which
+  keeps its plain blocking behavior. Swoole-independent, pinned by a new compatibility test rebuilding the proxy
+  shape. Isolation still gains nothing from counit; [`docs/compatibility.md`](docs/compatibility.md) has details.
+  (ad211fc)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.1...1.1.2
+
 ## 1.1.1 - 2026-08-27
 
 Documentation and diagnostics release for the 1.x series. The supported PHPUnit and PHP versions are unchanged
@@ -164,6 +183,24 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.2 - 2026-08-28
+
+Bug-fix release for the PHPUnit 8/9 maintenance series, mirroring 1.1.2. Supported versions are unchanged
+(PHPUnit ~8.0 / ~9.0 on PHP >= 7.2), and no test or consumer project needs changing.
+
+### Bug fixes
+
+- **Any process-isolated test hung the run when counit ran through its Composer bin proxy** (`vendor/bin/counit`),
+  spawning child processes without bound until killed. Same root cause as 1.1.2 — the replay of the parent's
+  included files re-executed counit's binary in the child — but PHPUnit 8/9 preserve global state by *default*, so
+  every isolated test was affected, and the child's PHPUnit run re-discovered the isolated test class and recursed
+  (observed downstream in swoole/library). The exclude-list registration covers both spellings —
+  `__PHPUNIT_ISOLATION_EXCLUDE_LIST` as of PHPUnit 9.3, `__PHPUNIT_ISOLATION_BLACKLIST` since 8.0.0 — so every
+  supported version is fixed; on PHP < 8 Composer's proxy includes through its `phpvfscomposer://` wrapper, a shape
+  that was never affected. Verified across the support matrix, with and without Swoole. (9c34927, 76b5fb2)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.3.1...0.3.2
 
 ## 0.3.1 - 2026-08-27
 
