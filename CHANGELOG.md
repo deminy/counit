@@ -8,6 +8,19 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.3 - 2026-08-29
+
+Documentation release for the 1.x series. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on
+PHP >= 8.4.1), and no test or consumer project needs changing — consumer-side PHPStan errors simply disappear.
+
+### Changes
+
+- **`TestCase` and `CounitExtension` are no longer marked `@internal`**: they are the documented API, and the tag
+  made PHPStan >= 2.1.13 and PhpStorm report consumer suites extending `Deminy\Counit\TestCase` — counit's internal
+  machinery keeps its `@internal` tags, mirroring PHPUnit's own split. (60598f4)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.2...1.1.3
+
 ## 1.1.2 - 2026-08-28
 
 Bug-fix release for the 1.x series. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on
@@ -183,6 +196,18 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.3 - 2026-08-29
+
+Documentation release for the PHPUnit 8/9 maintenance series, mirroring 1.1.3. Supported versions are unchanged
+(PHPUnit ~8.0 / ~9.0 on PHP >= 7.2), and no test or consumer project needs changing.
+
+### Changes
+
+- **`TestCase` and `CounitExtension` are no longer marked `@internal`** — same change as 1.1.3, on this line's
+  branch. (f4e340b)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.3.2...0.3.3
 
 ## 0.3.2 - 2026-08-28
 
