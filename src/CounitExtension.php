@@ -32,8 +32,6 @@ use PHPUnit\TextUI\Configuration\Configuration;
 use Swoole\Coroutine;
 
 /**
- * @internal this class is not covered by the backward compatibility promise for counit
- *
  * Register this extension in your phpunit.xml / phpunit.xml.dist:
  *
  *     <extensions>

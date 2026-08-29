@@ -39,6 +39,12 @@ return (new PhpCsFixer\Config())
         'not_operator_with_space'                          => false,
         'nullable_type_declaration_for_default_null_value' => ['use_nullable_type_declaration' => true],
         'not_operator_with_successor_space'                => false,
+        // The @PhpCsFixer ruleset would add a bare @internal to every test-shaped class -- including
+        // src/TestCase.php, the class automatic-approach consumers must extend (its name matches the
+        // rule's test-class heuristic). That class and CounitExtension are documented public API, and
+        // PHPStan >= 2.1.13 reports consumers' usage of @internal symbols, so the rule is off; the
+        // hand-written @internal tags on counit's internal machinery are unaffected.
+        'php_unit_internal_class'                          => false,
         'php_unit_strict'                                  => false,
         'phpdoc_align'                                     => ['align' => 'left'],
         'phpdoc_no_empty_return'                           => false,
