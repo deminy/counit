@@ -9,7 +9,9 @@ use Swoole\Constant;
 use Swoole\Coroutine;
 
 /**
- * @internal this class is not covered by the backward compatibility promise for counit
+ * The automatic approach's base class: extend it instead of PHPUnit\Framework\TestCase and your
+ * time/IO-bound tests run concurrently under the counit runner, with no other code changes.
+ *
  * @coversNothing
  */
 class TestCase extends BaseTestCase
