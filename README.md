@@ -404,14 +404,14 @@ which is what `Scheduler::start()` starts internally, via `Event::wait()` — fr
 Fatal error: Swoole\Coroutine\Scheduler::start(): Unable to call Event::wait() in coroutine
 ```
 
-[_Deminy\Counit\CoroutineScheduler::run()_](src/CoroutineScheduler.php) is a drop-in replacement for the snippet
+[_Deminy\Counit\CoroutineGroup::run()_](src/CoroutineGroup.php) is a drop-in replacement for the snippet
 above that is safe in both contexts — under plain _PHPUnit_ and under `counit`, with or without the Swoole extension
 enabled:
 
 ```php
-use Deminy\Counit\CoroutineScheduler;
+use Deminy\Counit\CoroutineGroup;
 
-CoroutineScheduler::run($coroutineA, $coroutineB);
+CoroutineGroup::run($coroutineA, $coroutineB);
 ```
 
 It blocks until every given callable — and everything it spawns via `go()` / `Coroutine::create()` — has finished,

@@ -30,11 +30,11 @@ use Swoole\Coroutine\WaitGroup;
  *
  *     Fatal error: Swoole\Coroutine\Scheduler::start(): Unable to call Event::wait() in coroutine
  *
- * `CoroutineScheduler::run()` is a drop-in replacement for the snippet above that is safe in both
+ * `CoroutineGroup::run()` is a drop-in replacement for the snippet above that is safe in both
  * contexts: it bootstraps a `Scheduler` when nothing is running yet (exactly as above), and starts
  * plain sibling coroutines instead when one already is.
  */
-final class CoroutineScheduler
+final class CoroutineGroup
 {
     /**
      * Runs every given callable as its own coroutine and blocks until all of them -- and

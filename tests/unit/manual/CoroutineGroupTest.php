@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Deminy\Counit\Tests;
 
-use Deminy\Counit\CoroutineScheduler;
+use Deminy\Counit\CoroutineGroup;
 use Deminy\Counit\Counit;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\ExpectationFailedException;
@@ -15,7 +15,7 @@ use Swoole\Runtime;
 /**
  * This suite runs in all four combinations covered by .github/workflows/unit_tests.yml -- under
  * `phpunit` and under `counit`, each with and without the Swoole extension enabled -- which is
- * what exercises every branch of CoroutineScheduler::run() without needing to force any of them
+ * what exercises every branch of CoroutineGroup::run() without needing to force any of them
  * directly: without the extension it falls back to calling the given callables in order; with the
  * extension but no coroutine running yet (plain `phpunit` never opens one) it bootstraps its own
  * `Scheduler`; and under `counit` with the extension enabled, every test method here already runs
@@ -26,7 +26,7 @@ use Swoole\Runtime;
  * @internal
  */
 #[CoversNothing]
-class CoroutineSchedulerTest extends TestCase
+class CoroutineGroupTest extends TestCase
 {
     /**
      * Every callable actually finishes before run() returns to the caller.
@@ -35,7 +35,7 @@ class CoroutineSchedulerTest extends TestCase
     {
         $finished = [];
 
-        CoroutineScheduler::run(
+        CoroutineGroup::run(
             static function () use (&$finished): void {
                 usleep(2_000);
                 $finished[] = 'a';
@@ -62,7 +62,7 @@ class CoroutineSchedulerTest extends TestCase
      * is the one place the two environments are expected to disagree.
      *
      * usleep() only yields once Swoole's coroutine hooks are enabled -- exactly like under a raw
-     * Swoole\Coroutine\Scheduler, which CoroutineScheduler::run() is a substitute for, not an
+     * Swoole\Coroutine\Scheduler, which CoroutineGroup::run() is a substitute for, not an
      * improvement on. Under `counit` with Swoole enabled they already are, globally, before the
      * run's one coroutine even opens (see the `counit` script); enabling them again here is then a
      * documented no-op. Under plain `phpunit` nothing has enabled them yet, so this test does --
@@ -82,7 +82,7 @@ class CoroutineSchedulerTest extends TestCase
         try {
             $finished = [];
 
-            CoroutineScheduler::run(
+            CoroutineGroup::run(
                 static function () use (&$finished): void {
                     usleep(300_000);
                     $finished[] = 'slow';
@@ -126,7 +126,7 @@ class CoroutineSchedulerTest extends TestCase
 
         $ran = false;
 
-        CoroutineScheduler::run(static function () use (&$ran): void {
+        CoroutineGroup::run(static function () use (&$ran): void {
             $ran = true;
         });
 
@@ -151,7 +151,7 @@ class CoroutineSchedulerTest extends TestCase
         Counit::create(function (): void {
             $ran = false;
 
-            CoroutineScheduler::run(static function () use (&$ran): void {
+            CoroutineGroup::run(static function () use (&$ran): void {
                 $ran = true;
             });
 
@@ -175,7 +175,7 @@ class CoroutineSchedulerTest extends TestCase
         $thrown = null;
 
         try {
-            CoroutineScheduler::run(
+            CoroutineGroup::run(
                 static function () use (&$ran): void {
                     $ran[] = 'a';
 
@@ -213,8 +213,8 @@ class CoroutineSchedulerTest extends TestCase
     {
         $this->expectException(ExpectationFailedException::class);
 
-        CoroutineScheduler::run(static function (): void {
-            self::assertSame(1, 2, 'deliberate failing assertion inside a CoroutineScheduler callable');
+        CoroutineGroup::run(static function (): void {
+            self::assertSame(1, 2, 'deliberate failing assertion inside a CoroutineGroup callable');
         });
     }
 
@@ -227,7 +227,7 @@ class CoroutineSchedulerTest extends TestCase
     {
         $start = microtime(true);
 
-        CoroutineScheduler::run();
+        CoroutineGroup::run();
 
         self::assertLessThan(1.0, microtime(true) - $start, 'run() with no callables must return immediately.');
     }
