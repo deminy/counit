@@ -7,6 +7,7 @@ namespace Deminy\Counit\Tests;
 use Deminy\Counit\CoroutineScheduler;
 use Deminy\Counit\Counit;
 use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\ExpectationFailedException;
 use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
 use Swoole\Runtime;
@@ -66,6 +67,11 @@ class CoroutineSchedulerTest extends TestCase
      * run's one coroutine even opens (see the `counit` script); enabling them again here is then a
      * documented no-op. Under plain `phpunit` nothing has enabled them yet, so this test does --
      * exactly as a consumer bootstrapping its own Scheduler-based test would.
+     *
+     * The 300x margin between the two sleeps (rather than, say, 2x) matches this project's own
+     * convention for timing-sensitive ordering assertions elsewhere (e.g.
+     * tests/regression/HandlerCanaryTest.php's usleep(300000) vs usleep(1000)) -- enough headroom
+     * that scheduler jitter on a loaded CI runner cannot plausibly flip the observed order.
      */
     public function testCallablesInterleaveOnlyWhenSwooleIsEnabled(): void
     {
@@ -78,7 +84,7 @@ class CoroutineSchedulerTest extends TestCase
 
             CoroutineScheduler::run(
                 static function () use (&$finished): void {
-                    usleep(20_000);
+                    usleep(300_000);
                     $finished[] = 'slow';
                 },
                 static function () use (&$finished): void {
@@ -151,5 +157,78 @@ class CoroutineSchedulerTest extends TestCase
 
             self::assertTrue($ran);
         });
+    }
+
+    /**
+     * A Throwable from one callable propagates out of run() to the caller, synchronously --
+     * exactly as it would have if that callable had simply been called directly instead of
+     * scheduled (see the class docblock). Neither Swoole branch can "cancel" a sibling coroutine
+     * that is already running, so with the extension available (both the fresh-Scheduler and the
+     * nested-coroutine branches) the sibling still runs to completion before run() rethrows;
+     * without the extension, run() calls the callables in order and a Throwable stops it right
+     * there, exactly like plain sequential PHP code would -- the one place, like the interleaving
+     * test above, the two environments are expected to disagree.
+     */
+    public function testThrowingCallablePropagatesAndSiblingsStillRun(): void
+    {
+        $ran    = [];
+        $thrown = null;
+
+        try {
+            CoroutineScheduler::run(
+                static function () use (&$ran): void {
+                    $ran[] = 'a';
+
+                    throw new \RuntimeException('boom');
+                },
+                static function () use (&$ran): void {
+                    $ran[] = 'b';
+                },
+            );
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        }
+
+        self::assertNotNull($thrown, 'run() must rethrow the Throwable, not swallow it.');
+        self::assertSame('boom', $thrown->getMessage());
+        self::assertContains('a', $ran);
+
+        if (extension_loaded('swoole')) {
+            self::assertContains('b', $ran, 'With Swoole available, the sibling callable still runs to completion.');
+        } else {
+            self::assertNotContains('b', $ran, 'Without Swoole, run() stops at the first Throwable, like plain sequential code.');
+        }
+    }
+
+    /**
+     * The realistic case behind the class's own safety claim: a failed PHPUnit assertion made
+     * inside a scheduled callable -- not a plain exception -- reaches PHPUnit's own handling
+     * exactly as it would have from the test body directly, in whichever branch this runs under.
+     * Before each callable's coroutine was wrapped in a try/catch, an uncaught Throwable here
+     * crashed the whole PHP process instead (Swoole does not propagate one out of a coroutine on
+     * its own): no PHPUnit summary at all, and every other test still queued behind this one
+     * silently never ran and was never reported, pass or fail.
+     */
+    public function testFailedAssertionInsideCallablePropagatesAsATestFailure(): void
+    {
+        $this->expectException(ExpectationFailedException::class);
+
+        CoroutineScheduler::run(static function (): void {
+            self::assertSame(1, 2, 'deliberate failing assertion inside a CoroutineScheduler callable');
+        });
+    }
+
+    /**
+     * run() is variadic; calling it with nothing to run must return immediately in every branch,
+     * not hang -- e.g. the fresh-Scheduler branch's Scheduler::start() with nothing added, or the
+     * nested-coroutine branch's WaitGroup counter starting (and staying) at zero.
+     */
+    public function testWorksWithZeroCallables(): void
+    {
+        $start = microtime(true);
+
+        CoroutineScheduler::run();
+
+        self::assertLessThan(1.0, microtime(true) - $start, 'run() with no callables must return immediately.');
     }
 }

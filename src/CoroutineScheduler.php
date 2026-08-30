@@ -41,12 +41,27 @@ final class CoroutineScheduler
      * everything they transitively spawn via `go()` / `Coroutine::create()` -- have finished.
      *
      * Unlike `Counit::create()`, this never returns before the work is done, so it does not
-     * participate in counit's assertion-attribution or late-failure/skip machinery: an assertion
-     * or exception inside a callable behaves exactly as it would if it ran synchronously in the
-     * calling test method, in every context.
+     * participate in counit's assertion-attribution or late-failure/skip machinery: every
+     * callable runs to completion regardless of what its siblings do, and the first Throwable
+     * any of them threw -- a failed assertion among them -- is rethrown from here, once
+     * everything has finished, exactly as it would be had that callable simply been called
+     * directly in the calling test method instead of scheduled. Swoole does not do this on its
+     * own: an uncaught Throwable does not propagate out of a coroutine to whatever started it,
+     * it kills the whole process instead (the same limitation `Counit::create()` guards against
+     * for its own spawned coroutines) -- both branches below catch inside each callable's own
+     * coroutine for that reason, purely to relay the failure back here, not to change what the
+     * caller ultimately sees.
      */
     public static function run(callable ...$callables): void
     {
+        if ($callables === []) {
+            // Nothing to do -- and nothing worth bootstrapping a Scheduler or a coroutine for
+            // either: an empty Scheduler::start() call emits its own engine-level deprecation
+            // warning on shutdown ("Event::wait() in shutdown function is deprecated"), noise a
+            // caller with nothing to run should never see.
+            return;
+        }
+
         if (!extension_loaded('swoole')) {
             // No coroutines are possible at all; the closest equivalent is running them one
             // after another, right here -- the same "no Swoole -> plain blocking behavior"
@@ -71,16 +86,35 @@ final class CoroutineScheduler
      * No coroutine running yet -- e.g. a test running under plain PHPUnit, or under `counit`
      * without the Swoole extension enabled. Scheduler::start() blocks until every coroutine it
      * started, and everything they spawned, has finished.
+     *
+     * A raw `Scheduler` does not catch what a scheduled callable throws: an uncaught Throwable
+     * still kills the whole process from inside `start()`, the same as it would from a bare
+     * `Coroutine::create()`. Each callable is wrapped to catch its own Throwable instead of
+     * letting `Scheduler` see it directly, so `start()` always returns; only the first Throwable
+     * observed across every callable is kept, and rethrown below once it has.
      */
     private static function runViaScheduler(callable ...$callables): void
     {
         $scheduler = new Scheduler();
+        $thrown    = null;
 
         foreach ($callables as $callable) {
-            $scheduler->add($callable);
+            $scheduler->add(static function () use ($callable, &$thrown): void {
+                try {
+                    $callable();
+                } catch (\Throwable $e) {
+                    if ($thrown === null) {
+                        $thrown = $e;
+                    }
+                }
+            });
         }
 
         $scheduler->start();
+
+        if ($thrown !== null) {
+            throw $thrown;
+        }
     }
 
     /**
@@ -109,19 +143,38 @@ final class CoroutineScheduler
      * drop to 1 while the outer coroutine is alive waiting on this call, which deadlocked every
      * such use permanently. Joining only what was actually spawned has no such blind spot,
      * whatever else happens to be running, nested or not.
+     *
+     * A bare `Coroutine::create()` does not catch what its callable throws either -- same as
+     * `Scheduler`, an uncaught Throwable kills the whole process instead of reaching this
+     * method's caller. Each callable is wrapped to catch its own Throwable -- from a `finally`,
+     * so `done()` is still called and the WaitGroup above never stalls on a throwing callable --
+     * keeping only the first Throwable observed across every callable, rethrown below once
+     * `wait()` returns.
      */
     private static function runViaNestedCoroutines(callable ...$callables): void
     {
         $waitGroup = new WaitGroup();
         $waitGroup->add(count($callables));
+        $thrown = null;
 
         foreach ($callables as $callable) {
-            Coroutine::create(static function () use ($callable, $waitGroup): void {
-                $callable();
-                $waitGroup->done();
+            Coroutine::create(static function () use ($callable, $waitGroup, &$thrown): void {
+                try {
+                    $callable();
+                } catch (\Throwable $e) {
+                    if ($thrown === null) {
+                        $thrown = $e;
+                    }
+                } finally {
+                    $waitGroup->done();
+                }
             });
         }
 
         $waitGroup->wait();
+
+        if ($thrown !== null) {
+            throw $thrown;
+        }
     }
 }
