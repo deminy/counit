@@ -383,63 +383,10 @@ of compatible features, a matrix of incompatible ones (each with a _Counit 0.x_ 
 
 Everything above speeds up a test that makes one blocking call — `sleep()`, a database query, an HTTP request — by
 letting it yield while other tests keep running. A different kind of test needs several of its *own* coroutines to
-run concurrently against each other: one exercising a mutex, a queue, or any other coroutine-native code directly,
-rather than making one call and waiting on it. Under plain _PHPUnit_ such a test bootstraps its own
-_Swoole\Coroutine\Scheduler_:
-
-```php
-use Swoole\Coroutine\Scheduler;
-
-$scheduler = new Scheduler();
-$scheduler->add($coroutineA);
-$scheduler->add($coroutineB);
-$scheduler->start();
-```
-
-Under the `counit` runner with the Swoole extension enabled, though, the whole _PHPUnit_ run already happens inside
-one coroutine (see [How Does It Work](#how-does-it-work)), and Swoole does not allow a second, nested event loop —
-which is what `Scheduler::start()` starts internally, via `Event::wait()` — from inside a running one:
-
-```
-Fatal error: Swoole\Coroutine\Scheduler::start(): Unable to call Event::wait() in coroutine
-```
-
-[_Deminy\Counit\CoroutineGroup::run()_](src/CoroutineGroup.php) is a drop-in replacement for the snippet
-above that is safe in both contexts — under plain _PHPUnit_ and under `counit`, with or without the Swoole extension
-enabled:
-
-```php
-use Deminy\Counit\CoroutineGroup;
-
-CoroutineGroup::run($coroutineA, $coroutineB);
-```
-
-It blocks until every given callable has finished. When nothing else is running yet (plain _PHPUnit_, or `counit`
-without Swoole), it also waits out anything a callable spawns itself via `go()` / `Coroutine::create()` without
-waiting for it first — the same as the `Scheduler` snippet above, since nothing else is running to end the wait
-early. Once already running inside a coroutine — every test under `counit` with Swoole enabled — only the given
-callables themselves are waited on; a callable that spawns further work should wait for it before returning, the
-same discipline any coroutine-native code needs.
-
-Unlike `Counit::create()`, it never returns before the work is done, so it does not participate in _counit_'s
-assertion-attribution or late-failure/skip machinery: every callable runs to completion regardless of what its
-siblings do, and the first Throwable any of them threw — a failed assertion among them — is rethrown once
-everything has finished, exactly as it would be had that callable simply been called directly in the calling test
-method instead of scheduled.
-
-If a callable might never finish — a genuinely stuck mutex or queue, not just a slow one —
-[_CoroutineGroup::runWithTimeout()_](src/CoroutineGroup.php) gives up after a deadline and throws, instead of risking
-a permanent hang:
-
-```php
-CoroutineGroup::runWithTimeout(5.0, $coroutineA, $coroutineB);
-```
-
-The deadline is only genuinely enforceable once already running inside a coroutine — every test under `counit` with
-Swoole enabled, the common case — because Swoole gives no way to abandon `Scheduler::start()`'s own wait (or an
-equivalent freshly-bootstrapped one) early from outside it. Everywhere else — plain _PHPUnit_, or `counit` without
-Swoole — `$seconds` is accepted but not enforced, and `runWithTimeout()` behaves exactly like `run()`; see its own
-docblock for the full breakdown.
+run concurrently against each other — one exercising a mutex, a queue, or any other coroutine-native code directly —
+which needs a different tool. **[docs/coroutine-native-testing.md](docs/coroutine-native-testing.md)** covers
+`Deminy\Counit\CoroutineGroup`, a nesting-safe, timeout-capable substitute for `Swoole\Coroutine\Scheduler`, including
+how sequential calls to it interact with each other.
 
 # Additional Notes
 
