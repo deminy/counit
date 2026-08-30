@@ -20,6 +20,7 @@ Table of Contents
    * [The Manual Approach](#the-manual-approach)
    * [Comparisons](#comparisons)
 * [Compatibility with PHPUnit](#compatibility-with-phpunit)
+* [Testing Coroutine-Native Code Directly](#testing-coroutine-native-code-directly)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
@@ -377,6 +378,47 @@ That leaves one combination to document: running tests **under the _counit_ runn
 concurrent mode this package exists for. **[docs/compatibility.md](docs/compatibility.md)** covers it in full: a matrix
 of compatible features, a matrix of incompatible ones (each with a _Counit 0.x_ reference column for the _PHPUnit_
 ~8.0/~9.0 maintenance line), and the per-feature notes behind every ⚠️/❌ entry.
+
+# Testing Coroutine-Native Code Directly
+
+Everything above speeds up a test that makes one blocking call — `sleep()`, a database query, an HTTP request — by
+letting it yield while other tests keep running. A different kind of test needs several of its *own* coroutines to
+run concurrently against each other: one exercising a mutex, a queue, or any other coroutine-native code directly,
+rather than making one call and waiting on it. Under plain _PHPUnit_ such a test bootstraps its own
+_Swoole\Coroutine\Scheduler_:
+
+```php
+use Swoole\Coroutine\Scheduler;
+
+$scheduler = new Scheduler();
+$scheduler->add($coroutineA);
+$scheduler->add($coroutineB);
+$scheduler->start();
+```
+
+Under the `counit` runner with the Swoole extension enabled, though, the whole _PHPUnit_ run already happens inside
+one coroutine (see [How Does It Work](#how-does-it-work)), and Swoole does not allow a second, nested event loop —
+which is what `Scheduler::start()` starts internally, via `Event::wait()` — from inside a running one:
+
+```
+Fatal error: Swoole\Coroutine\Scheduler::start(): Unable to call Event::wait() in coroutine
+```
+
+[_Deminy\Counit\CoroutineScheduler::run()_](src/CoroutineScheduler.php) is a drop-in replacement for the snippet
+above that is safe in both contexts — under plain _PHPUnit_ and under `counit`, with or without the Swoole extension
+enabled:
+
+```php
+use Deminy\Counit\CoroutineScheduler;
+
+CoroutineScheduler::run($coroutineA, $coroutineB);
+```
+
+It blocks until every given callable — and everything it spawns via `go()` / `Coroutine::create()` — has finished,
+exactly like the `Scheduler` snippet above. Unlike `Counit::create()`, it never returns before the work is done, so
+it does not participate in _counit_'s assertion-attribution or late-failure/skip machinery: an assertion or exception
+inside one of the callables behaves exactly as it would running synchronously in the calling test method, in every
+context.
 
 # Additional Notes
 
