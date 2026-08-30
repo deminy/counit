@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\CoroutineScheduler;
+use Deminy\Counit\Counit;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
@@ -124,5 +125,31 @@ class CoroutineSchedulerTest extends TestCase
         });
 
         self::assertTrue($ran);
+    }
+
+    /**
+     * `Counit::create()` wraps this body in its own coroutine, nested inside the one `counit`
+     * itself opens for the whole run under Swoole -- so `run()` here is called from a coroutine
+     * that is, in turn, nested inside another still-running one, unlike every test method above
+     * (which -- see the class docblock -- runs directly on `counit`'s one root coroutine, with
+     * nothing else in between). A version of `runViaNestedCoroutines()` that waited for the
+     * process-wide coroutine count to drop to exactly 1 could never satisfy that condition here,
+     * since the outer, `Counit::create()`-opened coroutine stays alive for the whole test method --
+     * it deadlocked this exact shape permanently. Under plain PHPUnit, `Counit::create()` isn't
+     * coroutine-friendly and just calls its callable directly, so this degenerates to the same
+     * "no coroutine running yet" shape `testWorksWhenAlreadyRunningInsideACoroutine()`'s sibling
+     * cases already cover.
+     */
+    public function testWorksWhenCalledFromInsideCounitCreate(): void
+    {
+        Counit::create(function (): void {
+            $ran = false;
+
+            CoroutineScheduler::run(static function () use (&$ran): void {
+                $ran = true;
+            });
+
+            self::assertTrue($ran);
+        });
     }
 }

@@ -6,6 +6,7 @@ namespace Deminy\Counit;
 
 use Swoole\Coroutine;
 use Swoole\Coroutine\Scheduler;
+use Swoole\Coroutine\WaitGroup;
 
 /**
  * A nesting-safe substitute for `Swoole\Coroutine\Scheduler` in tests that manage their own
@@ -89,31 +90,38 @@ final class CoroutineScheduler
      * `Scheduler::start()` -- needs no event loop of its own and is safe to call from within a
      * running coroutine.
      *
-     * There is no public Swoole API to join a specific coroutine, or to wait for only the
-     * descendants of a specific one, so completion is detected by polling the process-wide
-     * coroutine count down to 1 -- nothing left running besides the caller -- the same
-     * "everything finished" condition `Scheduler::start()` itself relies on (there, the
-     * process-wide count reaching zero).
+     * Completion is tracked with a `Swoole\Coroutine\WaitGroup`: one `add()` per callable before
+     * any of them starts, one `done()` per callable once it returns, `wait()` blocks until every
+     * `add()` has been matched by a `done()`. This waits on exactly -- only, and always -- the
+     * callables this call itself spawned, which matters because the calling coroutine is not
+     * necessarily the only other one alive: under `counit` with Swoole enabled, this method runs
+     * *nested* inside the run's own root coroutine (see the `counit` script) and, for the
+     * automatic approach or a manual test wrapped in `Counit::create()`, inside that test's own
+     * coroutine too -- both still alive and waiting on this very call to return.
      *
-     * A count captured just before starting the callables, and compared with ">", would look
-     * right in isolation but is not safe in a real suite: tests sharing this one coroutine run one
-     * after another, and a coroutine left over from whichever test ran just before this call --
-     * something with its own idle timeout still counting down, say -- would be part of that
-     * captured baseline. Such a straggler finishing during the wait below drops the count by one,
-     * same as one of *this* call's own coroutines finishing would, so a baseline comparison can
-     * read "no more than we started with" while one of ours is still running. Waiting for the
-     * count to reach exactly 1 has no such blind spot: every coroutine still alive, related to
-     * this call or not, is waited out -- at the cost of this call also waiting on stragglers that
-     * have nothing to do with it, and never returning at all should one of them never finish.
+     * An earlier version of this method instead polled the process-wide coroutine count
+     * (`Coroutine::stats()['coroutine_num']`) down to exactly 1, on the reasoning that "nothing
+     * left running besides the caller" is the same "everything finished" condition
+     * `Scheduler::start()` itself relies on. That reasoning silently assumed the caller's
+     * coroutine was the *only* other one alive -- true when this method is called directly from
+     * the process's one root coroutine, but false the moment it's called from a coroutine that is
+     * itself nested inside another still-running one, as above. In that shape the count can never
+     * drop to 1 while the outer coroutine is alive waiting on this call, which deadlocked every
+     * such use permanently. Joining only what was actually spawned has no such blind spot,
+     * whatever else happens to be running, nested or not.
      */
     private static function runViaNestedCoroutines(callable ...$callables): void
     {
+        $waitGroup = new WaitGroup();
+        $waitGroup->add(count($callables));
+
         foreach ($callables as $callable) {
-            Coroutine::create($callable);
+            Coroutine::create(static function () use ($callable, $waitGroup): void {
+                $callable();
+                $waitGroup->done();
+            });
         }
 
-        while (Coroutine::stats()['coroutine_num'] > 1) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
-            Coroutine::sleep(0.001);
-        }
+        $waitGroup->wait();
     }
 }
