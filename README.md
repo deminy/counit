@@ -414,11 +414,32 @@ use Deminy\Counit\CoroutineGroup;
 CoroutineGroup::run($coroutineA, $coroutineB);
 ```
 
-It blocks until every given callable — and everything it spawns via `go()` / `Coroutine::create()` — has finished,
-exactly like the `Scheduler` snippet above. Unlike `Counit::create()`, it never returns before the work is done, so
-it does not participate in _counit_'s assertion-attribution or late-failure/skip machinery: an assertion or exception
-inside one of the callables behaves exactly as it would running synchronously in the calling test method, in every
-context.
+It blocks until every given callable has finished. When nothing else is running yet (plain _PHPUnit_, or `counit`
+without Swoole), it also waits out anything a callable spawns itself via `go()` / `Coroutine::create()` without
+waiting for it first — the same as the `Scheduler` snippet above, since nothing else is running to end the wait
+early. Once already running inside a coroutine — every test under `counit` with Swoole enabled — only the given
+callables themselves are waited on; a callable that spawns further work should wait for it before returning, the
+same discipline any coroutine-native code needs.
+
+Unlike `Counit::create()`, it never returns before the work is done, so it does not participate in _counit_'s
+assertion-attribution or late-failure/skip machinery: every callable runs to completion regardless of what its
+siblings do, and the first Throwable any of them threw — a failed assertion among them — is rethrown once
+everything has finished, exactly as it would be had that callable simply been called directly in the calling test
+method instead of scheduled.
+
+If a callable might never finish — a genuinely stuck mutex or queue, not just a slow one —
+[_CoroutineGroup::runWithTimeout()_](src/CoroutineGroup.php) gives up after a deadline and throws, instead of risking
+a permanent hang:
+
+```php
+CoroutineGroup::runWithTimeout(5.0, $coroutineA, $coroutineB);
+```
+
+The deadline is only genuinely enforceable once already running inside a coroutine — every test under `counit` with
+Swoole enabled, the common case — because Swoole gives no way to abandon `Scheduler::start()`'s own wait (or an
+equivalent freshly-bootstrapped one) early from outside it. Everywhere else — plain _PHPUnit_, or `counit` without
+Swoole — `$seconds` is accepted but not enforced, and `runWithTimeout()` behaves exactly like `run()`; see its own
+docblock for the full breakdown.
 
 # Additional Notes
 

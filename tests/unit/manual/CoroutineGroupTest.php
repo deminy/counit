@@ -6,7 +6,9 @@ namespace Deminy\Counit\Tests;
 
 use Deminy\Counit\CoroutineGroup;
 use Deminy\Counit\Counit;
+use Deminy\Counit\Exception;
 use PHPUnit\Framework\Attributes\CoversNothing;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\ExpectationFailedException;
 use PHPUnit\Framework\TestCase;
 use Swoole\Coroutine;
@@ -230,5 +232,124 @@ class CoroutineGroupTest extends TestCase
         CoroutineGroup::run();
 
         self::assertLessThan(1.0, microtime(true) - $start, 'run() with no callables must return immediately.');
+    }
+
+    /**
+     * The realistic reason runWithTimeout() exists: a callable that never finishes -- a genuinely
+     * stuck mutex/queue test, not merely a slow one -- must not hang the whole run forever. Only
+     * meaningful once already running inside a coroutine (see runWithTimeout()'s own docblock):
+     * that is the one shape where the deadline is actually enforced, unlike the other two (see
+     * testRunWithTimeoutDoesNotEnforceTheDeadlineOutsideACoroutine()). The 50x margin between the
+     * timeout and the stuck callable's own sleep (0.01s vs 0.5s) matches this project's convention
+     * of a wide safety margin for timing-sensitive assertions.
+     */
+    public function testRunWithTimeoutThrowsWhenACallableNeverFinishes(): void
+    {
+        if (!extension_loaded('swoole') || Coroutine::getCid() === -1) {
+            self::markTestSkipped('The deadline is only enforced once already running inside a coroutine.');
+        }
+
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessageMatches('/still running after/');
+
+        CoroutineGroup::runWithTimeout(0.01, static function (): void {
+            Coroutine::sleep(0.5);
+        });
+    }
+
+    /**
+     * The other side of testRunWithTimeoutThrowsWhenACallableNeverFinishes(): outside an
+     * already-running coroutine, $seconds is accepted but genuinely cannot be enforced -- see
+     * runWithTimeout()'s own docblock for why (Scheduler::start() / Coroutine\run() always drain
+     * their own event loop fully, with no public API to abandon that wait early). Pinned here so a
+     * callable that outlasts the given "timeout" is confirmed to still run to completion rather
+     * than throw, in whichever of the two non-enforcing shapes this test happens to run under.
+     */
+    public function testRunWithTimeoutDoesNotEnforceTheDeadlineOutsideACoroutine(): void
+    {
+        if (extension_loaded('swoole') && Coroutine::getCid() !== -1) {
+            self::markTestSkipped('Only meaningful when the deadline cannot be enforced (see the sibling test).');
+        }
+
+        $ran = false;
+
+        CoroutineGroup::runWithTimeout(0.001, static function () use (&$ran): void {
+            usleep(300_000);
+            $ran = true;
+        });
+
+        self::assertTrue($ran, 'The callable must still run to completion even though it outlasted $seconds.');
+    }
+
+    /**
+     * The common, hopefully-typical case: every callable finishes well within the deadline, so
+     * runWithTimeout() behaves exactly like run() -- no exception, no different from what a
+     * consumer's coroutine-native test would see under a raw Scheduler with no timeout at all.
+     */
+    public function testRunWithTimeoutFinishesNormallyWithinTheDeadline(): void
+    {
+        $ran = false;
+
+        CoroutineGroup::runWithTimeout(5.0, static function () use (&$ran): void {
+            $ran = true;
+        });
+
+        self::assertTrue($ran);
+    }
+
+    /**
+     * A real failure inside a callable is more useful than a generic "timed out" report, so it
+     * wins -- confirmed here with a deadline generous enough that the failure, not the clock, is
+     * what ends the wait, in whichever branch this runs under. Mirrors
+     * testThrowingCallablePropagatesAndSiblingsStillRun(), run()'s equivalent.
+     */
+    public function testRunWithTimeoutPropagatesARealFailureRatherThanTimingOut(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('real failure');
+
+        CoroutineGroup::runWithTimeout(5.0, static function (): void {
+            throw new \RuntimeException('real failure');
+        });
+    }
+
+    /**
+     * $seconds <= 0 is rejected outright rather than silently degrading to an unbounded wait:
+     * Swoole's own WaitGroup::wait() treats a non-positive timeout as "no timeout" (the opposite
+     * of what a caller reaching for a *timeout* method would expect from passing e.g. 0), so
+     * runWithTimeout() refuses both instead of quietly inheriting that surprise.
+     */
+    #[DataProvider('nonPositiveSecondsProvider')]
+    public function testRunWithTimeoutRejectsNonPositiveSeconds(float $seconds): void
+    {
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessageMatches('/\$seconds must be greater than 0/');
+
+        CoroutineGroup::runWithTimeout($seconds, static function (): void {});
+    }
+
+    /**
+     * @return array<string, array{float}>
+     */
+    public static function nonPositiveSecondsProvider(): array
+    {
+        return [
+            'zero'     => [0.0],
+            'negative' => [-1.0],
+        ];
+    }
+
+    /**
+     * run() is variadic; calling runWithTimeout() with nothing to run must return immediately in
+     * every branch, not hang -- the same guarantee testWorksWithZeroCallables() pins for run(),
+     * extended here since the timeout machinery is a different code path.
+     */
+    public function testRunWithTimeoutWorksWithZeroCallables(): void
+    {
+        $start = microtime(true);
+
+        CoroutineGroup::runWithTimeout(1.0);
+
+        self::assertLessThan(1.0, microtime(true) - $start, 'runWithTimeout() with no callables must return immediately.');
     }
 }
