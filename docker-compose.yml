@@ -29,6 +29,4 @@ services:
   redis:
     image: redis
   web:
-    image: phpswoole/swoole
-    volumes:
-      - ./tests/server.php:/var/www/server.php
+    image: deminy/delayed-http-response:1.0.0

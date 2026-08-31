@@ -23,7 +23,7 @@ class CurlTest extends TestCase
     {
         Counit::create(
             function () use ($seconds, $message): void {
-                $ch = curl_init("http://web:9501?seconds={$seconds}");
+                $ch = curl_init("http://web/sleep/{$seconds}");
                 if ($ch === false) {
                     self::fail('The curl resource is invalid.');
                 }
@@ -34,7 +34,7 @@ class CurlTest extends TestCase
                 $endTime   = time();
 
                 self::assertEqualsWithDelta($seconds, ($endTime - $startTime), 1, $message);
-                self::assertSame('OK', $body, "{$message} The response is OK.");
+                self::assertSame('OK', trim((string) $body), "{$message} The response is OK.");
             },
             2 // The wrapped function call has two delayed assertions in it.
         );
