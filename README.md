@@ -20,6 +20,7 @@ Table of Contents
    * [The Manual Approach](#the-manual-approach)
    * [Comparisons](#comparisons)
 * [Compatibility with PHPUnit](#compatibility-with-phpunit)
+* [Testing Coroutine-Native Code Directly](#testing-coroutine-native-code-directly)
 * [Additional Notes](#additional-notes)
 * [Local Development](#local-development)
 * [Alternatives](#alternatives)
@@ -388,6 +389,15 @@ That leaves one combination to document: running tests **under the _counit_ runn
 concurrent mode this package exists for. **[docs/compatibility.md](docs/compatibility.md)** covers it in full: a matrix
 of compatible features, a matrix of incompatible ones (each with a _Counit 1.x_ reference column for the current
 _PHPUnit_ ~12.5.24/~13.0 line), and the per-feature notes behind every ⚠️/❌ entry.
+
+# Testing Coroutine-Native Code Directly
+
+Everything above speeds up a test that makes one blocking call — `sleep()`, a database query, an HTTP request — by
+letting it yield while other tests keep running. A different kind of test needs several of its *own* coroutines to
+run concurrently against each other — one exercising a mutex, a queue, or any other coroutine-native code directly —
+which needs a different tool. **[docs/coroutine-native-testing.md](docs/coroutine-native-testing.md)** covers
+`Deminy\Counit\CoroutineGroup`, a nesting-safe, timeout-capable substitute for `Swoole\Coroutine\Scheduler`, including
+how sequential calls to it interact with each other.
 
 # Additional Notes
 
