@@ -331,25 +331,47 @@ class CoroutineGroupTest extends TestCase
      * $seconds <= 0 is rejected outright rather than silently degrading to an unbounded wait:
      * Swoole's own WaitGroup::wait() treats a non-positive timeout as "no timeout" (the opposite
      * of what a caller reaching for a *timeout* method would expect from passing e.g. 0), so
-     * runWithTimeout() refuses both instead of quietly inheriting that surprise.
+     * runWithTimeout() refuses both instead of quietly inheriting that surprise. NAN and +/-INF are
+     * covered by the same check (`is_finite()`): every comparison against NAN except `!=` is false,
+     * so `NAN <= 0.0` alone would not have caught it, and INF passes `> 0.0` but isn't a meaningful
+     * bound either.
      */
-    #[DataProvider('nonPositiveSecondsProvider')]
-    public function testRunWithTimeoutRejectsNonPositiveSeconds(float $seconds): void
+    #[DataProvider('invalidSecondsProvider')]
+    public function testRunWithTimeoutRejectsInvalidSeconds(float $seconds): void
     {
         $this->expectException(Exception::class);
-        $this->expectExceptionMessageMatches('/\$seconds must be greater than 0/');
+        $this->expectExceptionMessageMatches('/\$seconds must be a positive, finite number/');
 
         CoroutineGroup::runWithTimeout($seconds, static function (): void {});
     }
 
     /**
+     * The same rejection, but with nothing to run: the validation must fire regardless of whether
+     * there happens to be any work, so a caller's mistake is never masked by having nothing to do.
+     * An earlier version of runWithTimeout() checked for zero callables *before* validating
+     * $seconds, so this exact call -- an invalid $seconds and no callables -- silently returned
+     * instead of throwing.
+     */
+    #[DataProvider('invalidSecondsProvider')]
+    public function testRunWithTimeoutRejectsInvalidSecondsEvenWithNoCallables(float $seconds): void
+    {
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessageMatches('/\$seconds must be a positive, finite number/');
+
+        CoroutineGroup::runWithTimeout($seconds);
+    }
+
+    /**
      * @return array<string, array{float}>
      */
-    public static function nonPositiveSecondsProvider(): array
+    public static function invalidSecondsProvider(): array
     {
         return [
-            'zero'     => [0.0],
-            'negative' => [-1.0],
+            'zero'               => [0.0],
+            'negative'           => [-1.0],
+            'nan'                => [NAN],
+            'positive infinity'  => [INF],
+            'negative infinity'  => [-INF],
         ];
     }
 

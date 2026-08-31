@@ -121,21 +121,27 @@ final class CoroutineGroup
      *   run, the same risk any other leftover coroutine already is.
      *
      * @throws \Throwable whatever the first callable to fail threw, if one did before the deadline
-     * @throws Exception if $seconds is not greater than zero, or if the deadline passed with no
-     *                   callable having failed yet
+     * @throws Exception if $seconds is not a positive, finite number, or if the deadline passed
+     *                   with no callable having failed yet
      */
     public static function runWithTimeout(float $seconds, callable ...$callables): void
     {
-        if ($callables === []) {
-            return;
-        }
-
-        if ($seconds <= 0.0) {
+        // Checked before the zero-callables short-circuit below, on purpose: an invalid $seconds
+        // is a caller mistake regardless of whether there happens to be anything to run, and
+        // should never be masked by having nothing to do.
+        if (!is_finite($seconds) || $seconds <= 0.0) {
             // A non-positive value is not "fail immediately": Swoole's own WaitGroup::wait()
             // treats it as "no timeout" (confirmed empirically), the opposite of what a caller
             // reaching for a *timeout* method would expect from passing e.g. 0. Rejected outright
-            // rather than silently degrading to an unbounded wait.
-            throw new Exception(sprintf('%s(): $seconds must be greater than 0, %F given.', __METHOD__, $seconds));
+            // rather than silently degrading to an unbounded wait. NAN and +/-INF are rejected the
+            // same way: every comparison against NAN (other than `!=`) is false, so `NAN <= 0.0`
+            // would otherwise slip past that check unvalidated and reach `WaitGroup::wait(NAN)`;
+            // INF passes `> 0.0` but isn't a meaningful bound either. `is_finite()` catches both.
+            throw new Exception(sprintf('%s(): $seconds must be a positive, finite number, %F given.', __METHOD__, $seconds));
+        }
+
+        if ($callables === []) {
+            return;
         }
 
         if (!extension_loaded('swoole') || Coroutine::getCid() === -1) {
