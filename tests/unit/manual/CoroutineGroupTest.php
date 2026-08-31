@@ -70,6 +70,18 @@ class CoroutineGroupTest extends TestCase
      * documented no-op. Under plain `phpunit` nothing has enabled them yet, so this test does --
      * exactly as a consumer bootstrapping its own Scheduler-based test would.
      *
+     * `Runtime::enableCoroutine()` sets that hook mask process-wide, not per-test -- so unlike
+     * enabling it (a genuine no-op under `counit`+Swoole, since it was already on), *disabling* it
+     * again afterward is only a no-op if this test is the one that turned it on in the first place.
+     * An earlier version of this test called `Runtime::enableCoroutine(0)` unconditionally in the
+     * `finally` block below: under `counit`+Swoole that silently zeroed out the hooks `counit`'s own
+     * bin script had already enabled globally for the whole run, for every test that happened to run
+     * afterward in the same process -- they kept passing (correctness was never affected) but
+     * silently stopped running concurrently, defeating the entire point of this package for the rest
+     * of the suite. Both calls below are now gated on genuinely owning that state: only when nothing
+     * has opened a coroutine yet (`Coroutine::getCid() === -1`, plain `phpunit`'s case) is this test
+     * the one responsible for the hooks, so only there does it touch them at all.
+     *
      * The 300x margin between the two sleeps (rather than, say, 2x) matches this project's own
      * convention for timing-sensitive ordering assertions elsewhere (e.g.
      * tests/regression/HandlerCanaryTest.php's usleep(300000) vs usleep(1000)) -- enough headroom
@@ -77,7 +89,9 @@ class CoroutineGroupTest extends TestCase
      */
     public function testCallablesInterleaveOnlyWhenSwooleIsEnabled(): void
     {
-        if (extension_loaded('swoole')) {
+        $ownsHookState = extension_loaded('swoole') && Coroutine::getCid() === -1;
+
+        if ($ownsHookState) {
             Runtime::enableCoroutine(SWOOLE_HOOK_SLEEP);
         }
 
@@ -109,7 +123,7 @@ class CoroutineGroupTest extends TestCase
                 );
             }
         } finally {
-            if (extension_loaded('swoole')) {
+            if ($ownsHookState) {
                 Runtime::enableCoroutine(0);
             }
         }
