@@ -23,6 +23,12 @@ use Swoole\Runtime;
  * the nesting-safe branch -- a raw `Swoole\Coroutine\Scheduler` in that position would abort with
  * "Unable to call Event::wait() in coroutine".
  *
+ * Deliberately left in the plain `Deminy\Counit\Tests` namespace, unlike its four siblings in this
+ * directory (`CurlTest`/`MySQLTest`/`RedisTest`/`SleepTest`, all namespaced under `...\Tests\Manual`
+ * to resolve a class-redeclare collision with their `tests/unit/automatic/` counterparts of the same
+ * name): this class has no such counterpart there, so there is nothing to collide with, and no
+ * reason to rename it too -- not a missed rename.
+ *
  * @internal
  * @coversNothing
  */
