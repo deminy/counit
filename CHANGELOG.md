@@ -8,6 +8,28 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.4 - 2026-08-30
+
+Feature release for the 1.x series: adds `CoroutineGroup` for testing coroutine-native code directly. Supported
+versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no existing test or consumer project
+needs changing.
+
+### Added
+
+- **`Deminy\Counit\CoroutineGroup`, a nesting-safe substitute for `Swoole\Coroutine\Scheduler`**, for tests that
+  manage their own coroutines directly (a mutex, a queue, or other coroutine-native code). `run(...$callables)` is
+  a drop-in replacement safe under plain PHPUnit and counit, with or without Swoole; `runWithTimeout(float $seconds,
+  ...$callables)` adds a bounded wait. See [`docs/coroutine-native-testing.md`](docs/coroutine-native-testing.md).
+  (de8cd89, 81ddb96, 7717428, e78cd02, c218692, 772cb20)
+
+### Changes
+
+- **"The Manual Approach" is documented as an escape hatch**, not a co-equal alternative to the automatic approach.
+  (4b09c62)
+- **The coroutine-native-testing guide and the benchmark comparisons moved to [`docs/`](docs/)**. (de72ab4, 4b09c62)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.3...1.1.4
+
 ## 1.1.3 - 2026-08-29
 
 Documentation release for the 1.x series. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on
@@ -196,6 +218,23 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.4 - 2026-08-30
+
+Feature release for the PHPUnit 8/9 maintenance series, mirroring 1.1.4. Supported versions are unchanged
+(PHPUnit ~8.0 / ~9.0 on PHP >= 7.2), and no existing test or consumer project needs changing.
+
+### Added
+
+- **`Deminy\Counit\CoroutineGroup`** — same feature as 1.1.4, ported to this line's PHP >= 7.2 floor. (fcbfd44,
+  32de793)
+
+### Changes
+
+- **Same doc changes as 1.1.4** ("The Manual Approach" reframed as an escape hatch; coroutine-native-testing and
+  benchmark docs moved to `docs/`). (f8873e5)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.3.3...0.3.4
 
 ## 0.3.3 - 2026-08-29
 
