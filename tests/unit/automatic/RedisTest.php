@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Deminy\Counit\Tests;
+namespace Deminy\Counit\Tests\Automatic;
 
 use Deminy\Counit\Helper;
 use Deminy\Counit\TestCase;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Deminy\Counit\Tests;
+namespace Deminy\Counit\Tests\Automatic;
 
 use Deminy\Counit\TestCase;
 use PHPUnit\Framework\Attributes\CoversNothing;
