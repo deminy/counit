@@ -3,11 +3,14 @@
 _Part of the [counit](../README.md) documentation._
 
 Both [the automatic approach](../README.md#the-automatic-approach-recommended) and
-[the manual approach](../README.md#the-manual-approach) perform identically — the choice between them is about which
-one you're able to use (see [The Manual Approach](../README.md#the-manual-approach) for when the automatic approach
-isn't an option), not about speed. The benchmarks below confirm it, across every environment, by running _counit_'s
-own sample test suites (see [Setup Test Environment](../README.md#setup-test-environment) for the Docker stack these
-commands need).
+[the manual approach](../README.md#the-manual-approach) perform identically for the same test — the choice between
+them is about which one you're able to use (see [The Manual Approach](../README.md#the-manual-approach) for when the
+automatic approach isn't an option), not about speed. The benchmarks below confirm it, across every environment, by
+running _counit_'s own sample test suites (see [Setup Test Environment](../README.md#setup-test-environment) for the
+Docker stack these commands need). The suites themselves aren't the same size, though: `tests/unit/manual/` also
+contains [`CoroutineGroupTest`](../src/CoroutineGroup.php), which has no automatic-approach counterpart (it tests a
+standalone utility class, not either testing approach), so the "manual" row below has more tests than "automatic" —
+that's a difference in what each suite covers, not in how fast either approach runs.
 
 Here we will run the tests under different environments, with or without Swoole.
 
@@ -59,21 +62,27 @@ in the Swoole container (where the Swoole extension is enabled); thus it's faste
   <tr>
     <td rowspan="2"><strong>counit (without Swoole), or PHPUnit</strong></td>
     <td>automatic</td>
-    <td rowspan="4">16</td>
-    <td rowspan="4">24</td>
+    <td>16</td>
+    <td>24</td>
     <td>48 seconds</td>
   </tr>
   <tr>
     <td>manual</td>
-    <td>48 seconds</td>
+    <td>38</td>
+    <td>62</td>
+    <td>49 seconds</td>
   </tr>
   <tr>
     <td rowspan="2"><strong>counit (with Swoole enabled)</strong></td>
     <td>automatic</td>
-    <td>7 seconds</td>
+    <td>16</td>
+    <td>24</td>
+    <td>6 seconds</td>
   </tr>
   <tr>
     <td>manual</td>
-    <td>7 seconds</td>
+    <td>38</td>
+    <td>64</td>
+    <td>6 seconds</td>
   </tr>
 </table>
