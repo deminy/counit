@@ -107,8 +107,8 @@ and is back-ported here where it applies.
 # Use "counit" in Your Project
 
 * Write unit tests in the same way as those for _PHPUnit_. However, to make those tests faster, please write those time/IO related tests using one of the following two approaches (details will be discussed in the next sections):
-  * **The automatic approach (recommended)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/0.x/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class; every test method is then wrapped in a coroutine automatically.
-  * **The manual approach**: Wrap each test case inside the callback function for method [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php), and use method [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php) instead of the PHP function _sleep()_.
+  * **The automatic approach (default choice — start here)**: Use class [_Deminy\Counit\TestCase_](https://github.com/deminy/counit/blob/0.x/src/TestCase.php) instead of _PHPUnit\Framework\TestCase_ as the base class; every test method is then wrapped in a coroutine automatically.
+  * **The manual approach**: only needed when a test class can't extend _Deminy\Counit\TestCase_ — most commonly because it already extends something else (a framework's own base class, or your project's shared internal one) and PHP only allows one parent. Wrap the specific test method's body in [_Deminy\Counit\Counit::create()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php), and use [_Deminy\Counit\Counit::sleep()_](https://github.com/deminy/counit/blob/0.x/src/Counit.php) instead of the PHP function _sleep()_ — no change to the class's `extends` clause required.
 * Use the binary executable _./vendor/bin/counit_ instead of _./vendor/bin/phpunit_ when running unit tests.
 * Have the Swoole extension installed. If not installed, _counit_ will work exactly same as _PHPUnit_ (in blocking mode).
 * **Register PHPUnit extension [_Deminy\Counit\CounitExtension_](https://github.com/deminy/counit/blob/0.x/src/CounitExtension.php) in your _phpunit.xml_ / _phpunit.xml.dist_.** See [Register the PHPUnit extension](#register-the-phpunit-extension) below; this package's own [phpunit.xml.dist](https://github.com/deminy/counit/blob/0.x/phpunit.xml.dist) registers it too.
@@ -195,6 +195,10 @@ made using two different approaches.
 ## The Automatic Approach (recommended)
 
 In this approach (previously called _the "global" style_), each test case runs in a separate coroutine automatically.
+Use it for every test class you can — it's the simplest and least error-prone way to get _counit_'s speedup, and
+needs no ongoing discipline once adopted. The only reason not to is if a test class must extend something other than
+_PHPUnit\Framework\TestCase_ already (PHP allows only one parent class) — see
+[The Manual Approach](#the-manual-approach) below for that case.
 
 For test cases written using this approach, the only change to make on your existing test cases is to use class
 _Deminy\Counit\TestCase_ instead of _PHPUnit\Framework\TestCase_ as the base class.
@@ -232,7 +236,25 @@ To find more tests written using this approach, please check tests under folder 
 <a id="the-case-by-case-style"></a>
 ## The Manual Approach
 
-In this approach (previously called _the "case by case" style_), you make changes directly on a test case to make it work asynchronously.
+In this approach (previously called _the "case by case" style_), you make changes directly on a test case to make it
+work asynchronously, without changing which class it extends.
+
+**Reach for this only when the automatic approach isn't an option.** PHP allows a class to extend only one parent, so
+if your test classes must already extend something else — a framework's own base class (e.g. Laravel's
+_Illuminate\Foundation\Testing\TestCase_, Symfony's _KernelTestCase_/_WebTestCase_) or a shared internal base class
+your project already relies on — you can't also extend _Deminy\Counit\TestCase_. The manual approach lets you speed
+up individual slow test methods with that `extends` clause left untouched. It also makes trialing _counit_ on a
+handful of tests lower-risk than committing a whole class hierarchy to the automatic approach up front.
+
+It comes with real trade-offs the automatic approach doesn't have: forgetting to wrap a slow test body doesn't error,
+it just silently leaves that one test blocking; calling PHP's native _sleep()_ instead of _Counit::sleep()_ inside a
+coroutine blocks the whole scheduler, not just that test; and the optional assertion-count parameter below is
+bookkeeping you have to get right yourself. Prefer the automatic approach whenever your test class can use it.
+
+If what you actually want is several of your *own* coroutines running concurrently against each other — testing a
+mutex, a queue, or other coroutine-native code directly, rather than speeding up one blocking call — see
+[_Deminy\Counit\CoroutineGroup_](docs/coroutine-native-testing.md) instead; it's a dedicated, nesting-safe primitive
+for that, usable from either approach, including from inside a manual-approach _Counit::create()_ call.
 
 For test cases written using this approach, we need to use class _Deminy\Counit\Counit_ accordingly in the test cases where
 we need to wait for PHP execution or to perform IO operations. Typically, following method calls will be used:
@@ -306,74 +328,10 @@ To find more tests written using this approach, please check tests under folder 
 
 ## Comparisons
 
-Here we will run the tests under different environments, with or without Swoole.
-
-`#1` Run the test suites using _PHPUnit_:
-
-```bash
-# To run test suite "automatic":
-docker compose exec -ti php    ./vendor/bin/phpunit --testsuite automatic
-# or,
-docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite automatic
-
-# To run test suite "manual":
-docker compose exec -ti php    ./vendor/bin/phpunit --testsuite manual
-# or,
-docker compose exec -ti swoole ./vendor/bin/phpunit --testsuite manual
-```
-
-`#2` Run the test suites using _counit_ (without Swoole):
-
-```bash
-# To run test suite "automatic":
-docker compose exec -ti php    ./counit --testsuite automatic
-
-# To run test suite "manual":
-docker compose exec -ti php    ./counit --testsuite manual
-```
-
-`#3` Run the test suites using _counit_  (with extension Swoole enabled):
-
-```bash
-# To run test suite "automatic":
-docker compose exec -ti swoole ./counit --testsuite automatic
-
-# To run test suite "manual":
-docker compose exec -ti swoole ./counit --testsuite manual
-```
-
-The first two sets of commands take about same amount of time to finish. The last set of commands uses _counit_ and runs
-in the Swoole container (where the Swoole extension is enabled); thus it's faster than the others:
-
-<table>
-  <tr>
-    <th>&nbsp;</th>
-    <th>Approach</th>
-    <th># of Tests</th>
-    <th># of Assertions</th>
-    <th>Time to Finish</th>
-  </tr>
-  <tr>
-    <td rowspan="2"><strong>counit (without Swoole), or PHPUnit</strong></td>
-    <td>automatic</td>
-    <td rowspan="4">16</td>
-    <td rowspan="4">24</td>
-    <td>48 seconds</td>
-  </tr>
-  <tr>
-    <td>manual</td>
-    <td>48 seconds</td>
-  </tr>
-  <tr>
-    <td rowspan="2"><strong>counit (with Swoole enabled)</strong></td>
-    <td>automatic</td>
-    <td>7 seconds</td>
-  </tr>
-  <tr>
-    <td>manual</td>
-    <td>7 seconds</td>
-  </tr>
-</table>
+Both approaches perform identically — the choice between them is about which one you're able to use (see
+[The Manual Approach](#the-manual-approach) above), not about speed. **[docs/comparisons.md](docs/comparisons.md)**
+has the proof: benchmarks running _counit_'s own sample test suites under every combination of _PHPUnit_/_counit_
+and with/without Swoole.
 
 # Compatibility with PHPUnit
 
