@@ -19,6 +19,13 @@ class Helper
     protected static $counter = 0;
 
     /**
+     * Reasons a notice() was already issued for, so each is announced once per process.
+     *
+     * @var array<string, true>
+     */
+    private static $noticesIssued = [];
+
+    /**
      * Check to see if running unit tests using counit, with the Swoole extension enabled.
      */
     public static function isCoroutineFriendly(): bool
@@ -56,6 +63,31 @@ class Helper
     public static function coroutineHookFlags(): int
     {
         return SWOOLE_HOOK_ALL & ~SWOOLE_HOOK_STDIO & ~SWOOLE_HOOK_FILE & ~SWOOLE_HOOK_PROC;
+    }
+
+    /**
+     * Announces a degradation once per process (per $reason), on STDERR -- excluded from the
+     * coroutine hooks, so writing it cannot yield. counit reads several PHPUnit internals by
+     * reflection; when one of them changes, the affected feature falls back to counit's
+     * pre-existing behavior instead of failing the run, and must say so here: a fallback without
+     * a notice degrades silently, which is how PHPUnit 13.4.0's internal changes went unnoticed
+     * on the 1.x line while every run kept exiting 0. Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to
+     * silence every counit notice.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function notice(string $reason, string $message): void
+    {
+        if (isset(self::$noticesIssued[$reason])) {
+            return;
+        }
+        self::$noticesIssued[$reason] = true;
+
+        if (getenv('COUNIT_SILENCE_TEARDOWN_NOTICE') !== false) {
+            return;
+        }
+
+        fwrite(STDERR, 'counit notice: ' . $message . ' Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.' . PHP_EOL);
     }
 
     public static function getNewKey(): string

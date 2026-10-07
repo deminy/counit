@@ -87,6 +87,7 @@ final class VerdictSequencing
             }
         } catch (\ReflectionException $e) {
             $active = false;
+            Helper::notice('verdict-sequencing', 'could not read the --stop-on-* settings (PHPUnit\'s internals have changed); if any of them is set, it may not react to verdicts of tests that finish after their first yield.');
         }
 
         self::$active = $active;

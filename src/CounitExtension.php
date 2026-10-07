@@ -292,9 +292,12 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
             $value = $listeners->getValue(Counit::$testResult);
 
             if (!is_array($value)) {
+                self::announceUncorrectedAssertionCount($delta);
+
                 return;
             }
 
+            $corrected = false;
             foreach ($value as $listener) {
                 if (!is_object($listener)) {
                     continue;
@@ -314,10 +317,21 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
 
                 if (is_int($total)) {
                     $property->setValue($listener, max(0, $total + $delta));
+                    $corrected = true;
                 }
+            }
+
+            if (!$corrected) {
+                self::announceUncorrectedAssertionCount($delta);
             }
         } catch (\ReflectionException $e) {
             // PHPUnit's internals have changed; leave the (approximate) total as is.
+            self::announceUncorrectedAssertionCount($delta);
         }
+    }
+
+    private static function announceUncorrectedAssertionCount(int $delta): void
+    {
+        Helper::notice('assertion-total', sprintf('could not correct the assertion total in PHPUnit\'s summary (no result printer with a numAssertions counter was found, or PHPUnit\'s internals have changed); the reported total is off by %d.', -$delta));
     }
 }

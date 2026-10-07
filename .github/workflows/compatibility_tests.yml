@@ -57,10 +57,16 @@ jobs:
         # Assert the exact summary line, not just the exit code: a miscount or a risky test -- e.g.
         # a falsely credited @doesNotPerformAssertions test -- changes the summary while the run
         # still exits 0. The expected result is identical with and without Swoole.
+        # A clean run must also print no "counit notice:" line: counit announces there when a
+        # PHPUnit internal it depends on has changed and a feature fell back -- the one signal a
+        # new PHPUnit release broke something while the run still passes.
         run: |
           set -o pipefail
-          ./counit --testsuite compatibility | tee /tmp/compatibility.log
-          grep -qF 'OK (49 tests, 60 assertions)' /tmp/compatibility.log
+          ./counit --testsuite compatibility 2> /tmp/compatibility.err | tee /tmp/compatibility.log
+          cat /tmp/compatibility.err
+          grep -qF 'OK (51 tests, 68 assertions)' /tmp/compatibility.log
+          # (Not "! grep": bash's errexit ignores a negated command unless it is the last one.)
+          if grep -qF 'counit notice:' /tmp/compatibility.err; then exit 1; fi
 
       - name: Test Unregistered-Extension Notice
         # Running without <extension class="Deminy\Counit\CounitExtension"/> registered is a silent

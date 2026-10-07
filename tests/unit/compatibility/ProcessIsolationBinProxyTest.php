@@ -81,8 +81,9 @@ PHP
             // get_included_files() entry as PHP 8 and the test pins the same shape there.
             // Copy the generic proxy, not the one Composer generates for vendor/bin/phpunit: that
             // one rewrites __DIR__/__FILE__ while reading, which overflows PHP's 8192-byte read
-            // buffer and silently truncates the counit script at some install-path lengths, and it
-            // reports phpvfscomposer:// paths, which PHPUnit's replay skips.
+            // buffer and truncates the counit script at some install-path lengths (PHP 7 only warns
+            // that the excess is lost), and it reports phpvfscomposer:// paths, which PHPUnit's
+            // replay skips.
             // (The closing marker is kept alone on its line, with the template in a variable: a
             // marker followed by other characters is PHP 7.3+ syntax, and this branch lints on 7.2.)
             $proxyTemplate = <<<'PHP'

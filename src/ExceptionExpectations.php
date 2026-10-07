@@ -33,15 +33,29 @@ final class ExceptionExpectations
     public static function isRegisteredFor(BaseTestCase $test): bool
     {
         try {
+            // Every supported release has getExpectedException(); the other getters vary by
+            // version (getExpectedExceptionMessageRegExp() is gone in PHPUnit 9), so only this
+            // one missing means the internals have changed.
+            if (!method_exists($test, 'getExpectedException')) { // @phpstan-ignore function.alreadyNarrowedType
+                self::announceUnreadableExpectations();
+            }
+
             foreach (self::GETTERS as $getter) {
                 if (method_exists($test, $getter) && $test->{$getter}() !== null) {
                     return true;
                 }
             }
         } catch (\Throwable $t) {
+            self::announceUnreadableExpectations();
+
             return false;
         }
 
         return false;
+    }
+
+    private static function announceUnreadableExpectations(): void
+    {
+        Helper::notice('exception-expectations', 'could not read a test\'s exception expectation (PHPUnit\'s internals have changed); an exception expected after the test\'s first yield may be reported as an error.');
     }
 }
