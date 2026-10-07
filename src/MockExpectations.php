@@ -34,8 +34,8 @@ use PHPUnit\Framework\TestCase as BaseTestCase;
  * strip) everything else, so plain stubs and mocks configured with only a parameters rule keep
  * working exactly as they do today, without paying for a join.
  *
- * PHPUnit keeps the registry in a private TestCase::$mockObjects property up to PHPUnit 13.4.0;
- * as of 13.4.1 the same list lives in a private property of the same name on a separate
+ * PHPUnit keeps the registry in a private TestCase::$mockObjects property up to PHPUnit 13.3;
+ * as of 13.4.0 the same list lives in a private property of the same name on a separate
  * MockObjectRegistry object, held by the private TestCase::$mockObjectRegistry. Both shapes are
  * probed; if neither is found, the probe reports "nothing to verify", which degrades to counit's
  * pre-existing behavior rather than breaking a run.
@@ -51,7 +51,7 @@ final class MockExpectations
     private static ?\ReflectionProperty $property = null;
 
     /**
-     * Set when the list sits on PHPUnit's MockObjectRegistry (13.4.1+): the hop from the test to
+     * Set when the list sits on PHPUnit's MockObjectRegistry (13.4.0+): the hop from the test to
      * the registry object that $property is then read from.
      */
     private static ?\ReflectionProperty $registryProperty = null;

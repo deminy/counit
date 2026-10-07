@@ -55,6 +55,7 @@ final class Coverage
             self::$drainWindowOpen = true;
         } catch (\Throwable) {
             // Fail soft: an uncovered drain only means the old under-reported aggregate.
+            self::announceUnderReportedCoverage();
         }
     }
 
@@ -73,6 +74,12 @@ final class Coverage
             CodeCoverageFacade::instance()->codeCoverage()->stop();
         } catch (\Throwable) {
             // Fail soft; see startDrainWindow().
+            self::announceUnderReportedCoverage();
         }
+    }
+
+    private static function announceUnderReportedCoverage(): void
+    {
+        Helper::notice('coverage', 'could not collect code coverage for test code that ran after its test\'s first yield (PHPUnit\'s internals have changed); the coverage report under-reports it.');
     }
 }

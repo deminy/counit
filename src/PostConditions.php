@@ -65,6 +65,7 @@ final class PostConditions
             // Changed PHPUnit internals: keep the old (too early) timing rather than crashing
             // the run. Under-detecting only costs this fix's guarantees, never a crash.
             $result = false;
+            Helper::notice('post-conditions', 'could not inspect a test class\'s post-condition hooks (PHPUnit\'s internals have changed); assertPostConditions() and #[PostCondition] methods may run before a test body that yields has finished.');
         }
 
         return self::$resolved[$className] = $result;

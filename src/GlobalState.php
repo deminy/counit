@@ -165,6 +165,7 @@ final class GlobalState
         } catch (\Throwable) {
             // Changed PHPUnit internals; fall back to the configuration-level answer resolved
             // above. Under-detecting only costs this fix's guarantees, never a crash.
+            Helper::notice('global-state', 'could not read a test\'s #[BackupGlobals], #[BackupStaticProperties] or #[WithEnvironmentVariable] attributes (PHPUnit\'s internals have changed); such tests may have their global state restored while their body is still running.');
         }
 
         return self::$resolved[$key] = ['any' => $globals || $statics || $env, 'statics' => $statics];

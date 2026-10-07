@@ -13,6 +13,13 @@ class Helper
     protected static int $counter = 0;
 
     /**
+     * Reasons a notice() was already issued for, so each is announced once per process.
+     *
+     * @var array<string, true>
+     */
+    private static array $noticesIssued = [];
+
+    /**
      * Check to see if running unit tests using counit, with the Swoole extension enabled.
      */
     public static function isCoroutineFriendly(): bool
@@ -95,6 +102,8 @@ class Helper
         } catch (\Throwable) {
             // Changed PHPUnit internals (the builder could not even be constructed): keep the
             // concurrent path, as below.
+            self::announceUnroutableInvocation();
+
             return true;
         }
 
@@ -147,6 +156,8 @@ class Helper
         } catch (\Throwable) {
             // Changed PHPUnit internals: keep the concurrent path rather than silently running
             // every suite at blocking speed.
+            self::announceUnroutableInvocation();
+
             return true;
         }
 
@@ -155,7 +166,7 @@ class Helper
 
     /**
      * The hook methods PHPUnit collected for a test class, read through PHPUnit's own (cached)
-     * HookMethods API. As of PHPUnit 13.4.1 HookMethods takes an event emitter, through which it
+     * HookMethods API. As of PHPUnit 13.4.0 HookMethods takes an event emitter, through which it
      * warns about misconfigured hook attributes while collecting a class's hooks. It gets PHPUnit's
      * real emitter: the per-class result is cached in a static property, and runBare() collects the
      * class's hooks before any counit code asks, so each warning is still reported exactly once.
@@ -169,6 +180,31 @@ class Helper
         return self::newPhpunitObject(\PHPUnit\Metadata\Api\HookMethods::class, static fn (): \PHPUnit\Event\Emitter => \PHPUnit\Event\Facade::emitter())
             ->hookMethods($className)
         ;
+    }
+
+    /**
+     * Announces a degradation once per process (per $reason), on STDERR -- excluded from the
+     * coroutine hooks, so writing it cannot yield. counit reads several PHPUnit internals by
+     * reflection; when one of them changes, the affected feature falls back to counit's
+     * pre-existing behavior instead of failing the run, and must say so here: a fallback without
+     * a notice degrades silently, which is how PHPUnit 13.4.0's internal changes went unnoticed
+     * while every run kept exiting 0. Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence every
+     * counit notice.
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function notice(string $reason, string $message): void
+    {
+        if (isset(self::$noticesIssued[$reason])) {
+            return;
+        }
+        self::$noticesIssued[$reason] = true;
+
+        if (getenv('COUNIT_SILENCE_TEARDOWN_NOTICE') !== false) {
+            return;
+        }
+
+        fwrite(STDERR, 'counit notice: ' . $message . ' Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.' . PHP_EOL);
     }
 
     public static function getNewKey(): string
@@ -204,8 +240,13 @@ class Helper
         self::$prefix = $prefix;
     }
 
+    private static function announceUnroutableInvocation(): void
+    {
+        self::notice('invocation-routing', 'could not inspect the command line through PHPUnit\'s CLI parser (PHPUnit\'s internals have changed); tests still run concurrently, but --version, --help and invalid options may end with an error message and exit code 255.');
+    }
+
     /**
-     * PHPUnit's CLI arguments builder. As of PHPUnit 13.4.1 the builder takes an event emitter,
+     * PHPUnit's CLI arguments builder. As of PHPUnit 13.4.0 the builder takes an event emitter,
      * through which it reports deprecated options and ignored option values while parsing.
      * Application::run() parses the same argv again right after this probe, with PHPUnit's real
      * emitter, so the probe's copy gets a silent emitter: PHPUnit's own DispatchingEmitter around a
@@ -236,7 +277,7 @@ class Helper
     /**
      * Instantiates a PHPUnit-internal class the way the running PHPUnit version expects: without
      * arguments, or -- for the classes that gained a required event-emitter parameter in PHPUnit
-     * 13.4.1 (HookMethods, CliArguments\Builder) -- with the emitter $emitter returns.
+     * 13.4.0 (HookMethods, CliArguments\Builder) -- with the emitter $emitter returns.
      *
      * @template T of object
      *

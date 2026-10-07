@@ -160,6 +160,7 @@ class JunitXmlCorrector
             }
         } catch (\Throwable) {
             // PHPUnit's internals have changed; leave the report as PHPUnit produced it.
+            Helper::notice('junit-report', 'could not correct the JUnit XML report (PHPUnit\'s internals have changed); it may miss verdicts, assertion counts and durations of tests that finished after their first yield.');
         }
     }
 
@@ -268,7 +269,7 @@ class JunitXmlCorrector
     /**
      * Every subscriber registered with the event dispatcher, flattened. Shared by junitLogger()
      * above and by HistoryCorrector (the test-run-history handler is reached the same way).
-     * Empty on any shape mismatch.
+     * Empty, with a notice, on any shape mismatch.
      *
      * @return list<object>
      *
@@ -278,32 +279,31 @@ class JunitXmlCorrector
     {
         $facade = EventFacade::instance();
 
-        $deferring = (new \ReflectionProperty($facade, 'deferringDispatcher'))->getValue($facade);
-        if (!$deferring instanceof DeferringDispatcher) {
-            return [];
-        }
-
-        $dispatcher = (new \ReflectionProperty($deferring, 'dispatcher'))->getValue($deferring);
-        if (!$dispatcher instanceof DirectDispatcher) {
-            return [];
-        }
-
-        $subscribers = (new \ReflectionProperty($dispatcher, 'subscribers'))->getValue($dispatcher);
-        if (!is_array($subscribers)) {
-            return [];
-        }
+        $deferring   = (new \ReflectionProperty($facade, 'deferringDispatcher'))->getValue($facade);
+        $dispatcher  = $deferring instanceof DeferringDispatcher ? (new \ReflectionProperty($deferring, 'dispatcher'))->getValue($deferring) : null;
+        $subscribers = $dispatcher instanceof DirectDispatcher ? (new \ReflectionProperty($dispatcher, 'subscribers'))->getValue($dispatcher) : null;
 
         $flattened = [];
-        foreach ($subscribers as $subscribersOfType) {
+        foreach (is_array($subscribers) ? $subscribers : [] as $subscribersOfType) {
             if (!is_array($subscribersOfType)) {
                 continue;
             }
 
-            foreach ($subscribersOfType as $subscriber) {
+            foreach ($subscribersOfType as $entry) {
+                // A plain subscriber up to PHPUnit 13.4; PHPUnit's parallel-execution work wraps
+                // each entry as ['subscriber' => ..., 'eventsOfThisProcessOnly' => ...].
+                $subscriber = is_array($entry) ? ($entry['subscriber'] ?? null) : $entry;
                 if (is_object($subscriber)) {
                     $flattened[] = $subscriber;
                 }
             }
+        }
+
+        // PHPUnit always registers subscribers of its own, so finding none means the dispatcher's
+        // internals have changed: the JUnit and test-run-history corrections cannot find what
+        // they correct.
+        if ($flattened === []) {
+            Helper::notice('event-subscribers', 'could not read PHPUnit\'s event subscribers; the JUnit XML report and the test-run history are left as PHPUnit wrote them, which can miss verdicts, assertion counts and durations of tests that finished after their first yield.');
         }
 
         return $flattened;

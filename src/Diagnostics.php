@@ -224,6 +224,8 @@ final class Diagnostics
         try {
             return MetadataRegistry::parser()->forMethod($test::class, $test->name())->isWithoutErrorHandler()->isNotEmpty();
         } catch (\Throwable) {
+            Helper::notice('without-error-handler', 'could not read a test\'s #[WithoutErrorHandler] attribute (PHPUnit\'s internals have changed); diagnostics such a test triggers after its first yield are handled by PHPUnit\'s error handler.');
+
             return false;
         }
     }

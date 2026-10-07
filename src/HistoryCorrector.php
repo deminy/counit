@@ -73,14 +73,12 @@ final class HistoryCorrector
                 return; // No history/result cache configured for this run.
             }
 
-            $store = (new \ReflectionProperty($handler, $storeProperty))->getValue($handler);
-            if (!is_object($store)) {
-                return;
-            }
-
+            $store   = (new \ReflectionProperty($handler, $storeProperty))->getValue($handler);
             $setTime = [$store, 'setTime'];
             $persist = [$store, 'persist'];
-            if (!is_callable($setTime) || !is_callable($persist)) {
+            if (!is_object($store) || !is_callable($setTime) || !is_callable($persist)) {
+                self::announceUncorrectedHistory();
+
                 return;
             }
 
@@ -113,6 +111,12 @@ final class HistoryCorrector
             }
         } catch (\Throwable) {
             // PHPUnit's internals have changed; leave the file as PHPUnit wrote it.
+            self::announceUncorrectedHistory();
         }
+    }
+
+    private static function announceUncorrectedHistory(): void
+    {
+        Helper::notice('test-run-history', 'could not correct PHPUnit\'s test-run history / result cache (PHPUnit\'s internals have changed); it may record tests that failed after their first yield as passed, and short durations.');
     }
 }

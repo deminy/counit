@@ -70,6 +70,7 @@ final class VerdictSequencing
             self::$active = $active;
         } catch (\Throwable) {
             self::$active = false;
+            Helper::notice('verdict-sequencing', 'could not read the --stop-on-*, --repeat and --retry settings (PHPUnit\'s internals have changed); if any of them is set, it may not react to verdicts of tests that finish after their first yield.');
         }
     }
 

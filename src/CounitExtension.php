@@ -378,6 +378,7 @@ final class CounitExtension implements Extension
 
                     $delta = Assert::getCount() - Counit::$creditedAssertionCount + Counit::lateAssertionCount();
                     if ($delta !== 0) {
+                        $corrected = false;
                         try {
                             $collector = (new \ReflectionProperty(TestResultFacade::class, 'collector'))->getValue();
                             if (is_object($collector)) {
@@ -385,10 +386,14 @@ final class CounitExtension implements Extension
                                 $total    = $property->getValue($collector);
                                 if (is_int($total)) {
                                     $property->setValue($collector, max(0, $total + $delta));
+                                    $corrected = true;
                                 }
                             }
-                        } catch (\ReflectionException) {
+                        } catch (\Throwable) {
                             // PHPUnit's internals have changed; leave the (approximate) total as is.
+                        }
+                        if (!$corrected) {
+                            Helper::notice('assertion-total', sprintf('could not correct the run\'s assertion total in PHPUnit\'s summary (PHPUnit\'s internals have changed); the reported total is off by %d.', -$delta));
                         }
                     }
                 }

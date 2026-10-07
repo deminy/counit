@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
  * path, where PHPUnit's own exit() calls work natively.
  *
  * Misrouting a real test run is a silent failure: the run still passes with the exact same summary,
- * just at blocking speed. PHPUnit 13.4.1 triggered exactly that by giving the CLI arguments builder
+ * just at blocking speed. PHPUnit 13.4.0 triggered exactly that by giving the CLI arguments builder
  * a required constructor parameter -- the probe's own construction failure was mistaken for invalid
  * CLI usage, and every Swoole run fell back to blocking mode.
  *
