@@ -69,15 +69,20 @@ class BinProxyProbeTest extends \PHPUnit\Framework\TestCase
 PHP
             );
 
-            // The same include shapes Composer's generated bin proxy uses (a trimmed copy of the
-            // real thing): on PHP >= 8 a plain include -- the proxy is the entry script, and
-            // counit's real binary lands as the second entry in get_included_files(), the exact
-            // shape whose replay this test pins. On PHP < 8 the plain include would be a fatal
-            // error (PHP only strips the "#!" shebang line of the MAIN script there; included, it
-            // becomes inline HTML ahead of the declare(strict_types=1) statement), so Composer
-            // includes through its shebang-stripping phpvfscomposer:// stream wrapper instead --
-            // whose entries PHPUnit's replay skips wholesale, which is why only the PHP >= 8
-            // plain-path shape ever leaked the binary into the child.
+            // The proxy Composer generates for vendor/bin/counit (a trimmed copy of the real thing;
+            // regenerate it from a consumer project's vendor/bin/counit if Composer changes it). On
+            // PHP >= 8 it is a plain include: the proxy is the entry script, and counit's real binary
+            // lands as the second entry in get_included_files() -- the exact shape whose replay this
+            // test pins. On PHP < 8 the plain include would be a fatal error (PHP strips the "#!"
+            // shebang line only from the MAIN script; included, it becomes inline HTML ahead of the
+            // declare(strict_types=1) statement), so the proxy includes through its shebang-stripping
+            // phpvfscomposer:// stream wrapper instead. For any binary but PHPUnit's own, that
+            // wrapper reports the binary's REAL path as the opened path, so PHP 7 records the same
+            // get_included_files() entry as PHP 8 and the test pins the same shape there.
+            // Copy the generic proxy, not the one Composer generates for vendor/bin/phpunit: that
+            // one rewrites __DIR__/__FILE__ while reading, which overflows PHP's 8192-byte read
+            // buffer and silently truncates the counit script at some install-path lengths, and it
+            // reports phpvfscomposer:// paths, which PHPUnit's replay skips.
             // (The closing marker is kept alone on its line, with the template in a variable: a
             // marker followed by other characters is PHP 7.3+ syntax, and this branch lints on 7.2.)
             $proxyTemplate = <<<'PHP'
@@ -103,7 +108,7 @@ if (PHP_VERSION_ID < 80000) {
                 // get rid of phpvfscomposer:// prefix for __FILE__ & __DIR__ resolution
                 $opened_path = substr($path, 17);
                 $this->realpath = realpath($opened_path) ?: $opened_path;
-                $opened_path = 'phpvfscomposer://' . $this->realpath;
+                $opened_path = $this->realpath;
                 $this->handle = fopen($this->realpath, $mode);
                 $this->position = 0;
 
@@ -117,8 +122,6 @@ if (PHP_VERSION_ID < 80000) {
                 if ($this->position === 0) {
                     $data = preg_replace('{^#!.*\r?\n}', '', $data);
                 }
-                $data = str_replace('__DIR__', var_export(dirname($this->realpath), true), $data);
-                $data = str_replace('__FILE__', var_export($this->realpath, true), $data);
 
                 $this->position += strlen($data);
 

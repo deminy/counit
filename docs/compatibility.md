@@ -115,8 +115,9 @@ line differs.
     every version this branch supports is covered) — merging with, never clobbering, entries registered by others.
     Only the entry script is excluded: the Composer autoloader and counit's own classes still reach the child, where
     `Helper::isCoroutineFriendly()` returns false and everything falls back to plain blocking _PHPUnit_ behavior, as
-    before. (On PHP < 8 Composer's proxy includes the binary through its `phpvfscomposer://` stream wrapper, whose
-    entries _PHPUnit_ already skips — the plain-path replay fixed here is the PHP >= 8 shape.)
+    before. This applies on PHP < 8 as well: there Composer's proxy includes the binary through its
+    `phpvfscomposer://` stream wrapper, but for any binary other than _PHPUnit_'s own that wrapper records the
+    binary's real path, so the replay sees the same entry as on PHP >= 8.
 * Annotation _@doesNotPerformAssertions_ and method _expectNotToPerformAssertions()_ (when called in _setUp()_ or at
   the top of the test body) are supported in both approaches: such tests report clean with zero assertions, same as
   under _PHPUnit_. Remaining limitations, both consequences of the risky verdict being rendered when the test's
