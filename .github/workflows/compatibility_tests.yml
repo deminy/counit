@@ -1,6 +1,13 @@
 name: Compatibility Tests
 
-on: [ push, pull_request, workflow_dispatch ]
+on:
+  push:
+  pull_request:
+  # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
+  # PHPUnit 13.4.1 broke counit silently for runs resolving it, with no commit here to trigger CI.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -8,8 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Each supported line at both ends: its floor (12.5.24 exactly, the first release with the
+        # invokeTestMethod() hook counit depends on; "~13.0.0", the latest 13.0.x patch) and its
+        # newest release.
         env:
+          - {phpunit: "12.5.24", php: "8.3"}
           - {phpunit: "~12.5.24", php: "8.3"}
+          - {phpunit: "~13.0.0", php: "8.4"}
           - {phpunit: "~13.0", php: "8.4"}
         extensions:
           - swoole-stable
@@ -32,7 +44,11 @@ jobs:
           coverage: pcov
 
       - name: Install Dependencies
-        run: composer install -nq --no-progress
+        # Requiring the matrix version explicitly: a plain install (there is no committed lock file)
+        # always resolves the newest release PHP allows, so floor versions would never be tested.
+        run: |
+          composer require "phpunit/phpunit=${{ matrix.env.phpunit }}" -W -nq --no-progress
+          ./vendor/bin/phpunit --version
 
       - name: Test Compatibility with PHPUnit
         # The reported assertion total is checked too, not just the exit code: counit corrects that

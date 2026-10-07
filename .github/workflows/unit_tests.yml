@@ -1,6 +1,13 @@
 name: Unit Tests
 
-on: [ push, pull_request, workflow_dispatch ]
+on:
+  push:
+  pull_request:
+  # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
+  # PHPUnit 13.4.1 broke counit silently for runs resolving it, with no commit here to trigger CI.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -8,7 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        phpunit: ["~12.5.24", "~13.0"]
+        # "~13.0.0" pins the oldest 13.x minor (latest 13.0.x patch); "~13.0" follows the newest 13.x release.
+        phpunit: ["~12.5.24", "~13.0.0", "~13.0"]
 
     name: Run Tests With PHPUnit ${{ matrix.phpunit }}
 
