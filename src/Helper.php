@@ -87,11 +87,15 @@ class Helper
         try {
             // fromParameters() expects the full argv: its parser discards the first element (the
             // program name) itself, exactly as Application::run() hands it over.
-            $cliConfiguration = (new \PHPUnit\TextUI\CliArguments\Builder())->fromParameters($argv);
-        } catch (\Throwable) {
+            $cliConfiguration = self::cliArgumentsBuilder()->fromParameters($argv);
+        } catch (\PHPUnit\TextUI\CliArguments\Exception) {
             // Invalid CLI usage: PHPUnit reports it and exits directly. That exit must not
             // happen inside a coroutine.
             return false;
+        } catch (\Throwable) {
+            // Changed PHPUnit internals (the builder could not even be constructed): keep the
+            // concurrent path, as below.
+            return true;
         }
 
         try {
@@ -149,6 +153,24 @@ class Helper
         return true;
     }
 
+    /**
+     * The hook methods PHPUnit collected for a test class, read through PHPUnit's own (cached)
+     * HookMethods API. As of PHPUnit 13.4.1 HookMethods takes an event emitter, through which it
+     * warns about misconfigured hook attributes while collecting a class's hooks. It gets PHPUnit's
+     * real emitter: the per-class result is cached in a static property, and runBare() collects the
+     * class's hooks before any counit code asks, so each warning is still reported exactly once.
+     *
+     * @param class-string<\PHPUnit\Framework\TestCase> $className
+     *
+     * @return array<string, \PHPUnit\Runner\HookMethodCollection>
+     */
+    public static function hookMethods(string $className): array
+    {
+        return self::newPhpunitObject(\PHPUnit\Metadata\Api\HookMethods::class, static fn (): \PHPUnit\Event\Emitter => \PHPUnit\Event\Facade::emitter())
+            ->hookMethods($className)
+        ;
+    }
+
     public static function getNewKey(): string
     {
         if (self::$prefix === '') {
@@ -180,5 +202,57 @@ class Helper
             $prefix = uniqid('test-key-') . '-' . getmypid() . '-';
         }
         self::$prefix = $prefix;
+    }
+
+    /**
+     * PHPUnit's CLI arguments builder. As of PHPUnit 13.4.1 the builder takes an event emitter,
+     * through which it reports deprecated options and ignored option values while parsing.
+     * Application::run() parses the same argv again right after this probe, with PHPUnit's real
+     * emitter, so the probe's copy gets a silent emitter: PHPUnit's own DispatchingEmitter around a
+     * dispatcher that discards every event. Handing it the real emitter instead would report each
+     * such deprecation/warning twice.
+     */
+    private static function cliArgumentsBuilder(): \PHPUnit\TextUI\CliArguments\Builder
+    {
+        return self::newPhpunitObject(\PHPUnit\TextUI\CliArguments\Builder::class, static function (): \PHPUnit\Event\Emitter {
+            // The telemetry system is borrowed from PHPUnit's own emitter, since its constructor
+            // arguments vary between PHPUnit versions.
+            $system = (new \ReflectionProperty(\PHPUnit\Event\DispatchingEmitter::class, 'system'))->getValue(\PHPUnit\Event\Facade::emitter());
+            if (!$system instanceof \PHPUnit\Event\Telemetry\System) {
+                throw new \UnexpectedValueException('Unable to obtain the telemetry system of PHPUnit\'s event emitter.');
+            }
+
+            return new \PHPUnit\Event\DispatchingEmitter(
+                new class implements \PHPUnit\Event\Dispatcher {
+                    public function dispatch(\PHPUnit\Event\Event $event): void
+                    {
+                    }
+                },
+                $system,
+            );
+        });
+    }
+
+    /**
+     * Instantiates a PHPUnit-internal class the way the running PHPUnit version expects: without
+     * arguments, or -- for the classes that gained a required event-emitter parameter in PHPUnit
+     * 13.4.1 (HookMethods, CliArguments\Builder) -- with the emitter $emitter returns.
+     *
+     * @template T of object
+     *
+     * @param class-string<T> $className
+     * @param \Closure(): \PHPUnit\Event\Emitter $emitter
+     *
+     * @return T
+     */
+    private static function newPhpunitObject(string $className, \Closure $emitter): object
+    {
+        $class       = new \ReflectionClass($className);
+        $constructor = $class->getConstructor();
+        if ($constructor === null || $constructor->getNumberOfRequiredParameters() === 0) {
+            return $class->newInstance();
+        }
+
+        return $class->newInstance($emitter());
     }
 }

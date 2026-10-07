@@ -34,9 +34,11 @@ use PHPUnit\Framework\TestCase as BaseTestCase;
  * strip) everything else, so plain stubs and mocks configured with only a parameters rule keep
  * working exactly as they do today, without paying for a join.
  *
- * PHPUnit keeps the registry in a private property of the same name and shape on both supported
- * lines (12.5 and 13); if it ever changes, the probe reports "nothing to verify", which degrades
- * to counit's pre-existing behavior rather than breaking a run.
+ * PHPUnit keeps the registry in a private TestCase::$mockObjects property up to PHPUnit 13.4.0;
+ * as of 13.4.1 the same list lives in a private property of the same name on a separate
+ * MockObjectRegistry object, held by the private TestCase::$mockObjectRegistry. Both shapes are
+ * probed; if neither is found, the probe reports "nothing to verify", which degrades to counit's
+ * pre-existing behavior rather than breaking a run.
  *
  * @internal this class is not covered by the backward compatibility promise for counit
  */
@@ -47,6 +49,12 @@ final class MockExpectations
     private static bool $noticeIssued = false;
 
     private static ?\ReflectionProperty $property = null;
+
+    /**
+     * Set when the list sits on PHPUnit's MockObjectRegistry (13.4.1+): the hop from the test to
+     * the registry object that $property is then read from.
+     */
+    private static ?\ReflectionProperty $registryProperty = null;
 
     public static function isVerifiableFor(BaseTestCase $test): bool
     {
@@ -70,7 +78,12 @@ final class MockExpectations
         }
 
         try {
-            $registered = self::$property->getValue($test);
+            $holder = self::$registryProperty === null ? $test : self::$registryProperty->getValue($test);
+            if (!is_object($holder)) {
+                return false;
+            }
+
+            $registered = self::$property->getValue($holder);
 
             if (!is_array($registered)) {
                 return false;
@@ -109,6 +122,15 @@ final class MockExpectations
             if (property_exists(BaseTestCase::class, 'mockObjects')) {
                 self::$property  = new \ReflectionProperty(BaseTestCase::class, 'mockObjects');
                 self::$available = true;
+            } elseif (property_exists(BaseTestCase::class, 'mockObjectRegistry')) {
+                $registryProperty = new \ReflectionProperty(BaseTestCase::class, 'mockObjectRegistry');
+                $registryType     = $registryProperty->getType();
+                $registryClass    = $registryType instanceof \ReflectionNamedType ? $registryType->getName() : '';
+                if (class_exists($registryClass) && property_exists($registryClass, 'mockObjects')) {
+                    self::$registryProperty = $registryProperty;
+                    self::$property         = new \ReflectionProperty($registryClass, 'mockObjects');
+                    self::$available        = true;
+                }
             }
         } catch (\Throwable) {
             self::$available = false;

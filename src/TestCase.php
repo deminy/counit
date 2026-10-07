@@ -10,7 +10,6 @@ use PHPUnit\Event\Facade as EventFacade;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\SkippedTest;
 use PHPUnit\Framework\TestCase as BaseTestCase;
-use PHPUnit\Metadata\Api\HookMethods;
 use PHPUnit\Runner\HookMethod;
 use PHPUnit\Runner\HookMethodCollection;
 use Swoole\Constant;
@@ -176,7 +175,7 @@ class TestCase extends BaseTestCase
             }
 
             try {
-                $collection = (new HookMethods())->hookMethods($className)['after'];
+                $collection = Helper::hookMethods($className)['after'];
                 (new \ReflectionProperty(HookMethodCollection::class, 'hookMethods'))->setValue($collection, $state['original']);
             } catch (\Throwable) {
                 // Leave that class alone: its next takeover attempt self-checks and degrades
@@ -386,7 +385,7 @@ class TestCase extends BaseTestCase
         self::$relocatedAfterHooks[static::class] = [];
 
         try {
-            $collection = (new HookMethods())->hookMethods(static::class)['after'];
+            $collection = Helper::hookMethods(static::class)['after'];
             $reflector  = new \ReflectionClass(static::class);
             $names      = [];
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Deminy\Counit;
 
 use PHPUnit\Framework\TestCase as BaseTestCase;
-use PHPUnit\Metadata\Api\HookMethods;
 
 /**
  * The join switch for test classes that customize PHPUnit's post-condition phase -- an overridden
@@ -94,6 +93,6 @@ final class PostConditions
         // present) assertPostConditions default entry -- so anything beyond that one entry is a
         // real hook. Reading the collection is free here: runBare() built and statically cached
         // it before the test method was invoked.
-        return count((new HookMethods())->hookMethods($className)['postCondition']->methodNamesSortedByPriority()) > 1;
+        return count(Helper::hookMethods($className)['postCondition']->methodNamesSortedByPriority()) > 1;
     }
 }
