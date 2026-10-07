@@ -10,44 +10,25 @@ prefix.
 
 ## 1.1.5 - 2026-10-06
 
-Bug-fix release for the 1.x series: restores compatibility with PHPUnit 13.4, and prepares for changes coming in
-PHPUnit 13.5. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no test or
-consumer project needs changing. Upgrading is strongly recommended for anyone whose lock file resolved PHPUnit 13.4.0
-or later: every problem below degraded silently, with runs still exiting 0.
-
-**Upgrade note.** counit now prints a one-line `counit notice:` on STDERR whenever a PHPUnit internal it depends on
-has changed and a feature falls back to less exact behavior. A clean run prints none; `COUNIT_SILENCE_TEARDOWN_NOTICE=1`
-silences them, as it does counit's other notices. Exit codes are untouched.
+Bug-fix release for the 1.x series: restores compatibility with PHPUnit 13.4 and prepares for PHPUnit 13.5. Supported
+versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no test needs changing. **Upgrade if your
+lock file resolves PHPUnit 13.4.0 or later**: with 1.1.4, every problem below went unnoticed, as runs still exited 0.
 
 ### Bug fixes
 
-- **Swoole runs are concurrent again on PHPUnit 13.4.** PHPUnit 13.4.0's CLI arguments builder gained a required
-  event-emitter constructor parameter, and the probe the `counit` script uses to tell test runs from CLI commands
-  (`--version`, `--help`, ...) mistook its own construction failure for invalid CLI usage: every run took the plain
-  blocking path, at blocking speed, with the blocking summary. The probe now builds the parser the way the running
-  PHPUnit expects (with a silent emitter, so a deprecated option such as `--cache-result` is still reported once),
-  and only a genuine CLI parse error selects blocking mode; any other failure keeps the concurrent path. (dcec655)
-- **`tearDown()`, `#[After]` and post-condition hooks observe a finished test body again on PHPUnit 13.4.**
-  PHPUnit's hook-method collector gained the same constructor parameter, so the after-test hook takeover gave up
-  (with a STDERR notice) and PHPUnit ran those hooks at the test body's first yield, while the body was still
-  running; a customized post-condition phase stopped joining its tests for the same reason. (dcec655)
-- **Mock expectations satisfied or violated after a yield are verified correctly again on PHPUnit 13.4.** PHPUnit
-  moved the test's mock-object list into a new `MockObjectRegistry`; counit now finds it in both places. Without
-  it, such a test fell back to PHPUnit's premature verification (with a STDERR notice). (dcec655)
-- **The JUnit XML report and the test-run history stay correct on PHPUnit 13.5.** PHPUnit's upcoming
-  parallel-execution work (planned for 13.5) changes how its event dispatcher stores subscribers, and counit reaches
-  the JUnit logger and the history handler through that list. On a 13.5 development build, counit found neither: the
-  report showed no `<failure>`/`<error>` element for tests that failed after a yield (a JUnit-reading CI would show
-  green while the run exited 2), assertion counts were wrong, and the failures were also printed a second time after
-  the summary. counit now reads both layouts. (210e913)
+- **PHPUnit 13.4 compatibility.** PHPUnit 13.4.0 changed three internals counit relies on, so with 1.1.4 Swoole runs
+  silently fell back to blocking mode (no concurrency), `tearDown()`/`#[After]` and post-condition hooks ran while the
+  test body was still running, and mock expectations met or violated after a yield were checked too early. All three
+  work again. (dcec655)
+- **JUnit report and test-run history on PHPUnit 13.5.** PHPUnit's planned 13.5 changes to its event dispatcher would
+  have left failures that happen after a yield out of the JUnit report (the run exits 2, the report shows none) and
+  miscounted assertions. counit now handles both the current and the new layout. (210e913)
 
 ### Changes
 
-- **Fallbacks after a PHPUnit internals change are announced instead of silent.** Several features fell back without
-  a word when an internal they read had changed: the corrected assertion total, the post-condition join, the
-  `--stop-on-*`/`--repeat`/`--retry` join, the global-state and `#[WithoutErrorHandler]` lookups, the JUnit and
-  history corrections, the drain's coverage window, and the routing of `--version`/`--help`. Each now prints the
-  one-line notice above, so the next PHPUnit release that moves an internal is noticed on the first run. (210e913)
+- **No more silent fallbacks.** When a PHPUnit internal counit depends on changes, the affected feature still falls
+  back rather than failing the run, but now says so in a one-line `counit notice:` on STDERR. A normal run prints none;
+  `COUNIT_SILENCE_TEARDOWN_NOTICE=1` silences them. Exit codes are unchanged. (210e913)
 
 **Full changelog**: https://github.com/deminy/counit/compare/1.1.4...1.1.5
 
