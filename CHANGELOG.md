@@ -8,6 +8,31 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.5 - 2026-10-06
+
+Bug-fix release for the 1.x series: restores compatibility with PHPUnit 13.4.1. Supported versions are unchanged
+(~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no test or consumer project needs changing. Upgrading is
+strongly recommended for anyone whose lock file resolved PHPUnit 13.4.1: every problem below degraded silently,
+with runs still exiting 0.
+
+### Bug fixes
+
+- **Swoole runs are concurrent again on PHPUnit 13.4.1.** PHPUnit's CLI arguments builder gained a required
+  event-emitter constructor parameter, and the probe the `counit` script uses to tell test runs from CLI commands
+  (`--version`, `--help`, ...) mistook its own construction failure for invalid CLI usage: every run took the plain
+  blocking path, at blocking speed, with the blocking summary. The probe now builds the parser the way the running
+  PHPUnit expects (with a silent emitter, so a deprecated option such as `--cache-result` is still reported once),
+  and only a genuine CLI parse error selects blocking mode; any other failure keeps the concurrent path. (dcec655)
+- **`tearDown()`, `#[After]` and post-condition hooks observe a finished test body again on PHPUnit 13.4.1.**
+  PHPUnit's hook-method collector gained the same constructor parameter, so the after-test hook takeover gave up
+  (with a STDERR notice) and PHPUnit ran those hooks at the test body's first yield, while the body was still
+  running; a customized post-condition phase stopped joining its tests for the same reason. (dcec655)
+- **Mock expectations satisfied or violated after a yield are verified correctly again on PHPUnit 13.4.1.** PHPUnit
+  moved the test's mock-object list into a new `MockObjectRegistry`; counit now finds it in both places. Without
+  it, such a test fell back to PHPUnit's premature verification (with a STDERR notice). (dcec655)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.4...1.1.5
+
 ## 1.1.4 - 2026-08-30
 
 Feature release for the 1.x series: adds `CoroutineGroup` for testing coroutine-native code directly. Supported
