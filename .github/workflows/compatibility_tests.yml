@@ -1,6 +1,13 @@
 name: Compatibility Tests
 
-on: [ push, pull_request, workflow_dispatch ]
+on:
+  push:
+  pull_request:
+  # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
+  # PHPUnit 13.4.1 broke counit's 1.x line silently, with no commit there to trigger CI.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -36,12 +43,15 @@ jobs:
           coverage: pcov
 
       - name: Install Dependencies
+        # Requiring the matrix version explicitly: a plain install (there is no committed lock file)
+        # always resolves the newest release PHP allows, so the PHPUnit 8 entries would test 9.6.
         run: |
-          composer install -nq --no-progress
+          composer require "phpunit/phpunit=${{ matrix.env.phpunit }}" -W -nq --no-progress
           # PHPUnit 8 only suggests php-invoker, which --enforce-time-limit needs (9 requires it).
           if ./vendor/bin/phpunit --version | grep -qF 'PHPUnit 8.'; then
             composer require "phpunit/php-invoker:^2.0 || ^3.1" -W -nq --no-progress
           fi
+          ./vendor/bin/phpunit --version
 
       - name: Test Compatibility with PHPUnit
         # Assert the exact summary line, not just the exit code: a miscount or a risky test -- e.g.
