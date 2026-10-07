@@ -30,7 +30,7 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          set -ex
+          set -ex -o pipefail
 
           # Run tests using PHPUnit (Swoole is disabled).
           docker compose exec -T php ./vendor/bin/phpunit --testsuite automatic
@@ -46,4 +46,10 @@ jobs:
 
           # Run tests using counit, with Swoole enabled.
           docker compose exec -T swoole ./counit --testsuite automatic
-          docker compose exec -T swoole ./counit --testsuite manual
+          docker compose exec -T swoole ./counit --testsuite manual | tee /tmp/manual-swoole.log
+
+          # A run silently falling back to blocking mode still passes, with the blocking summary
+          # (Assertions: 62, Skipped: 2): CoroutineGroupTest skips a different test inside a
+          # coroutine, so only the concurrent path produces this exact line. PHPUnit 13.4.1 broke
+          # counit's invocation routing that way without failing any step here.
+          grep -qF 'Tests: 38, Assertions: 64, Skipped: 1.' /tmp/manual-swoole.log
