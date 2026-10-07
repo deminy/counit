@@ -31,9 +31,9 @@ blocking) is the central design constraint of the codebase: every change must be
 - `0.x` is not bug-fix-only: compatibility work developed on `master` is back-ported wherever it applies.
 - Tags carry no `v` prefix. `CHANGELOG.md` exists only on `master` and covers both series; when a change is ported,
   the 0.3.x entry is written alongside the 1.x one and may defer to it.
-- The remote branches `0.3.x`, `9.x` and `10.x` are stale 2024 leftovers, not release lines; the 0.3.x *series* is
-  released from `0.x`. PHPUnit 10 support was attempted once and deliberately dropped: no PHPUnit 10 release is both
-  hookable and free of CVE-2026-24765.
+- Remote branches other than `master` and `0.x` (e.g. the stale 2024 `0.3.x`, `9.x` and `10.x`) are not release
+  lines; the 0.3.x *series* is released from `0.x`. PHPUnit 10 support was attempted once and deliberately dropped:
+  no PHPUnit 10 release is both hookable and free of CVE-2026-24765.
 
 ## Architecture
 
@@ -87,9 +87,10 @@ documented per feature in `docs/compatibility.md`.
 ### `master` specifics
 
 - `TestCase` overrides `invokeTestMethod()` (PHPUnit 13, backported to 12.5.24) and wraps only the test body in
-  `Counit::create(..., 1)`; `setUp()` runs outside the coroutine. PHPUnit's final `runBare()` treats the body's first
-  yield as the end of the test, so `tearDown()`/`#[After]` are *taken over*: PHPUnit's cached hook collection is pointed
-  at a method nothing declares, and the hooks are replayed inside the coroutine right after the body.
+  `Counit::create(..., 1)`; `setUp()` runs outside the coroutine. PHPUnit's final `runBare()` (split into
+  `runLifecycle()` and private phase methods as of 13.4) treats the body's first yield as the end of the test, so
+  `tearDown()`/`#[After]` are *taken over*: PHPUnit's cached hook collection is pointed at a method nothing declares,
+  and the hooks are replayed inside the coroutine right after the body.
   `tearDownCoroutine()` (and `Counit::defer()` for the manual approach) always observe a finished body.
 - `Helper::invocationRunsTests()` routes CLI commands (`--version`, `--help`, ...) and invalid usage to the blocking
   path; on any unexpected failure it keeps the concurrent path.
@@ -118,8 +119,10 @@ documented per feature in `docs/compatibility.md`.
 
 Fixes are usually *adapted* rather than cherry-picked:
 
-- Guard manual-approach logic in `0.x`'s `Counit::create()` with `!$caller instanceof Deminy\Counit\TestCase`, so the
-  automatic wrapper's own `create()` call is not wrapped or joined twice.
+- Guard manual-approach logic in `0.x`'s `Counit::create()` with `!($caller instanceof \Deminy\Counit\TestCase)` (the
+  leading backslash matters: inside `namespace Deminy\Counit` the unqualified name resolves to a class that does not
+  exist, and the guard silently never matches), so the automatic wrapper's own `create()` call is not wrapped or
+  joined twice.
 - PHPUnit 8.0 lacks some APIs 9.x has (e.g. `@postCondition` exists only from 9.1): feature-detect rather than assume.
 - Verify `0.x` on PHPUnit 9.6 and 8.0.x (the floor), `master` on 13.x and 12.5.x, each with and without Swoole.
 - Finish each port with the "matrix follow-up": update the other branch's `docs/compatibility.md` (see below).
@@ -138,13 +141,17 @@ summary lines, not just exit codes.
 
 counit reaches into PHPUnit internals (private properties, `@internal` classes) where no public seam exists. Rules:
 
-- Every such access is fail-soft: on failure, fall back to the pre-existing behavior and print a one-time STDERR
-  notice (silenced with `COUNIT_SILENCE_TEARDOWN_NOTICE=1`). Never fail a run, and never degrade silently.
+- Every such access is fail-soft: on failure, fall back to the pre-existing behavior and announce it once with
+  `Helper::notice()` (a `counit notice:` line on STDERR, silenced with `COUNIT_SILENCE_TEARDOWN_NOTICE=1`). Never
+  fail a run, and never degrade silently: a clean run prints no notice, and CI fails one that does.
 - Reflect a private property on its *declaring* class; it is invisible through a subclass.
-- On `master`, instantiate PHPUnit internals through `Helper::newPhpunitObject()`. PHPUnit 13.4.1 added a required
-  `Emitter` constructor parameter to `CliArguments\Builder` and `Metadata\Api\HookMethods`; a bare `new` broke routing,
-  the hook takeover and post-condition joins at once, and every run still exited 0.
-- New PHPUnit patch releases can move internals without notice. The weekly CI runs exist to catch that.
+- On `master`, instantiate PHPUnit internals through `Helper` (its private `newPhpunitObject()`, used by wrappers such
+  as `Helper::hookMethods()`). PHPUnit 13.4.0 added a required `Emitter` constructor parameter to
+  `CliArguments\Builder` and `Metadata\Api\HookMethods`; a bare `new` broke routing, the hook takeover and
+  post-condition joins at once, and every run still exited 0.
+- New PHPUnit releases can move internals without notice; the weekly CI runs and the notice canary exist to catch
+  that. PHPUnit's parallel-execution work (planned for 13.5) wraps the event dispatcher's subscriber entries;
+  `JunitXmlCorrector::registeredSubscribers()` reads both layouts.
 
 ## Test suites and approaches
 
@@ -220,7 +227,7 @@ Expected results (blocking and counit + Swoole, unless noted):
 | Suite | `master` | `0.x` |
 |---|---|---|
 | `automatic` | `OK (16 tests, 24 assertions)` | `OK (16 tests, 24 assertions)` |
-| `compatibility` | `OK (64 tests, 78 assertions)` | `OK (49 tests, 60 assertions)` |
+| `compatibility` | `OK (67 tests, 90 assertions)` | `OK (51 tests, 68 assertions)` |
 | `manual`, blocking | `Tests: 38, Assertions: 62, Skipped: 2.` | same as `master` |
 | `manual`, counit + Swoole | `Tests: 38, Assertions: 64, Skipped: 1.` | same as `master` |
 
@@ -228,13 +235,14 @@ Expected results (blocking and counit + Swoole, unless noted):
 difference doubles as a check — a Swoole run that silently fell back to blocking mode prints the blocking line, and
 CI fails on it. Always check the summary line, not just the exit code.
 
-Six blocking-mode runs take ~290s in total; budget timeouts accordingly.
+The six blocking-mode runs in `unit_tests.yml` (four plain PHPUnit, two counit without Swoole) take ~290s in total;
+budget timeouts accordingly.
 
 ## Static analysis
 
 PHPStan `^2.0` at level 9 over `src/` and `tests/` (`phpstan.neon.dist`). It needs the `swoole` extension loaded and
-reports differently across PHP versions, so run it on the PHP and Swoole versions CI uses — PHP 8.4 with Swoole 6.2 on
-`master`, PHP 8.1 with Swoole 5.1 on `0.x`:
+reports differently across PHP versions, so run it on the PHP and Swoole versions CI uses — PHP 8.4 with the latest
+Swoole (6.2 at the time of writing) on `master`, PHP 8.1 with Swoole 5.1 on `0.x` — after `composer install`:
 
 ```bash
 IMAGE=phpswoole/swoole:6.2-php8.4-alpine   # on 0.x: phpswoole/swoole:5.1-php8.1-alpine
@@ -260,13 +268,19 @@ Docblocks must not contain the literal `*/` — e.g. writing `--stop-on-*/--repe
 - `unit_tests.yml` — Docker Compose based; both approaches under plain PHPUnit and under counit, with and without
   Swoole. PHPUnit ~12.5.24, ~13.0.0 and ~13.0 on `master`; ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on `0.x`.
 - `compatibility_tests.yml` — the `compatibility` suite plus the `tests/regression/` steps on GitHub-hosted runners,
-  with and without Swoole. On `master`: PHPUnit 12.5.24 and ~12.5.24 on PHP 8.3, ~13.0.0 and ~13.0 on PHP 8.4. On
-  `0.x`: PHPUnit ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on PHP 7.4, plus ~8.0 and ~9.0 on PHP 8.2.
+  with and without Swoole (job names say which). On `master`: PHPUnit 12.5.24 and ~12.5.24 on PHP 8.3, ~13.0.0 and
+  ~13.0 on PHP 8.4. On `0.x`: PHPUnit ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on PHP 7.4, plus ~8.0 and ~9.0 on PHP 8.2.
 - `static_analysis.yml` — PHPStan, on PHP 8.4 (`master`) or 8.1 (`0.x`).
 - `coding_style_checks.yml` — php-cs-fixer, as above.
 - `syntax_checks.yml` — `phplint` on PHP 8.3–8.5 (`master`) or 7.2–8.3 (`0.x`).
-- Both test workflows run weekly as well, so a breaking PHPUnit release is noticed without a push.
+- Both test workflows run weekly as well, so a breaking PHPUnit release is noticed without a push. GitHub runs
+  schedules only from the default branch, so `master`'s `weekly_0x_tests.yml` starts `0.x`'s two test workflows.
+- Both fail a clean run that prints a `counit notice:` line (see "Relying on PHPUnit internals").
 - The compatibility workflow `composer require`s the matrix's PHPUnit version; a plain install (there is no committed
   lock file) always resolves the newest release PHP allows.
 - On `0.x` it also installs `phpunit/php-invoker` for PHPUnit 8, which only *suggests* it but needs it for
-  `--enforce-time-limit`.
+  `--enforce-time-limit`; allows the PHPUnit 8.0.x/9.0.x floor releases despite their security advisory
+  (CVE-2026-24765), which current Composer refuses by default; and skips the coverage step for PHPUnit 8 on PHP 8,
+  which cannot collect coverage there.
+- In workflow scripts, write a negative check as `if grep -q ...; then exit 1; fi`, not `! grep -q ...`: bash's
+  errexit ignores a negated command unless it is the step's last line.
