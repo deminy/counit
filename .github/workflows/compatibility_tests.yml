@@ -87,14 +87,14 @@ jobs:
             rc=0
             COUNIT_SILENCE_TEARDOWN_NOTICE=1 ./counit --no-configuration tests/regression/JunitCountTest.php > /dev/null 2> /tmp/notice-silenced.err || rc=$?
             test "$rc" -eq 0
-            ! grep -qF 'is not registered' /tmp/notice-silenced.err
+            if grep -qF 'is not registered' /tmp/notice-silenced.err; then exit 1; fi
           else
-            ! grep -qF 'is not registered' /tmp/notice.err
+            if grep -qF 'is not registered' /tmp/notice.err; then exit 1; fi
           fi
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/JunitCountTest.php > /dev/null 2> /tmp/notice-registered.err || rc=$?
           test "$rc" -eq 0
-          ! grep -qF 'is not registered' /tmp/notice-registered.err
+          if grep -qF 'is not registered' /tmp/notice-registered.err; then exit 1; fi
 
       - name: Test Late Skip/Incomplete Handling
         # A skip/incomplete signalled after the test's first yield cannot be made native (the
@@ -117,8 +117,8 @@ jobs:
             test "$rc" -eq 0
             # The verdicts are native now: neither the fallback notice nor a deferred failure
             # may appear.
-            ! grep -qF 'status remains "passed"' /tmp/late-skip.err
-            ! grep -qF 'already been reported as passed' /tmp/late-skip.err
+            if grep -qF 'status remains "passed"' /tmp/late-skip.err; then exit 1; fi
+            if grep -qF 'already been reported as passed' /tmp/late-skip.err; then exit 1; fi
             case "$target" in
               LateSkipTest)        grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log ;;
               LateSkipCleanupTest) grep -qF 'Tests: 1, Assertions: 1, Skipped: 1.' /tmp/late-skip.log ;;
@@ -142,7 +142,7 @@ jobs:
           cat /tmp/late-skip.log /tmp/late-skip.err
           test "$rc" -eq 0
           grep -qF 'Tests: 3, Assertions: 0, Skipped: 2, Incomplete: 1.' /tmp/late-skip.log
-          ! grep -qF 'status remains "passed"' /tmp/late-skip.err
+          if grep -qF 'status remains "passed"' /tmp/late-skip.err; then exit 1; fi
           test -s /tmp/late-skip.xml
           grep -qF '</testsuites>' /tmp/late-skip.xml
           test "$(grep -c '<testcase' /tmp/late-skip.xml)" -eq 3
@@ -165,9 +165,9 @@ jobs:
           test "$rc" -eq 1
           grep -qF 'Tests: 3, Assertions: 2, Failures: 1, Skipped: 1.' /tmp/depends-fail.log
           # The dependent must not have run (its body fails loudly if it does) ...
-          ! grep -qF 'the dependent of a failed producer must be skipped' /tmp/depends-fail.log
+          if grep -qF 'the dependent of a failed producer must be skipped' /tmp/depends-fail.log; then exit 1; fi
           # ... and the producer's failure must be a real one, not a deferred end-of-run notice.
-          ! grep -qF 'already been reported as passed' /tmp/depends-fail.err
+          if grep -qF 'already been reported as passed' /tmp/depends-fail.err; then exit 1; fi
           # A joined producer's after-test hooks run natively: a throwing tearDown() errors the
           # producer itself (exit 2, no deferred block) and its dependent is skipped -- while a
           # later non-joined test of the same class still gets the relocated (post-body) hooks,
@@ -177,8 +177,8 @@ jobs:
           cat /tmp/depends-td.log /tmp/depends-td.err
           test "$rc" -eq 2
           grep -qF 'Tests: 6, Assertions: 5, Errors: 1, Skipped: 1.' /tmp/depends-td.log
-          ! grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log
-          ! grep -qF 'already been reported as passed' /tmp/depends-td.err
+          if grep -qF 'the dependent of an errored producer must be skipped' /tmp/depends-td.log; then exit 1; fi
+          if grep -qF 'already been reported as passed' /tmp/depends-td.err; then exit 1; fi
           # A joined producer that performs no assertions must stay RISKY under Swoole -- the
           # join path applies no up-front assertion credit (a credited producer would count one
           # assertion and lose the verdict). PHPUnit 12/13 records the producer's pass and
@@ -210,20 +210,20 @@ jobs:
           test "$rc" -eq 2
           grep -qF 'Tests: 5, Assertions: 4, Errors: 1, Skipped: 1.' /tmp/setup-fail.log
           # tearDown() must have run for both aborted tests (the guard test fails otherwise) ...
-          ! grep -qF 'tearDown() must run' /tmp/setup-fail.log
+          if grep -qF 'tearDown() must run' /tmp/setup-fail.log; then exit 1; fi
           # ... its own post-setUp-failure Throwable must be swallowed, as under blocking PHPUnit ...
-          ! grep -qF 'must be swallowed' /tmp/setup-fail.log
-          ! grep -qF 'must be swallowed' /tmp/setup-fail.err
+          if grep -qF 'must be swallowed' /tmp/setup-fail.log; then exit 1; fi
+          if grep -qF 'must be swallowed' /tmp/setup-fail.err; then exit 1; fi
           # ... and nothing may surface as a deferred end-of-run failure.
-          ! grep -qF 'already been reported as passed' /tmp/setup-fail.err
+          if grep -qF 'already been reported as passed' /tmp/setup-fail.err; then exit 1; fi
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/TearDownSkipTest.php > /tmp/teardown-skip.log 2> /tmp/teardown-skip.err || rc=$?
           cat /tmp/teardown-skip.log /tmp/teardown-skip.err
           test "$rc" -eq 1
           grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
-          ! grep -qF 'already been reported as passed' /tmp/teardown-skip.err
+          if grep -qF 'already been reported as passed' /tmp/teardown-skip.err; then exit 1; fi
           # In neither mode may the skip be honored as a skip.
-          ! grep -qF 'Skipped:' /tmp/teardown-skip.log
+          if grep -qF 'Skipped:' /tmp/teardown-skip.log; then exit 1; fi
 
       - name: Test Exception Expectation Semantics
         # A test whose expected exception is thrown only after a yield used to fail prematurely
@@ -247,7 +247,7 @@ jobs:
           grep -qF 'Failed asserting that exception of type "RuntimeException" is thrown.' /tmp/exception-fail.log
           grep -qF 'deliberate tearDown() throw of the very class the test expects' /tmp/exception-fail.log
           # ... and nothing may surface as a deferred end-of-run failure.
-          ! grep -qF 'already been reported as passed' /tmp/exception-fail.err
+          if grep -qF 'already been reported as passed' /tmp/exception-fail.err; then exit 1; fi
 
       - name: Test Time Limit Enforcement
         # --enforce-time-limit used to measure only up to a test's first yield under Swoole (an
@@ -268,7 +268,7 @@ jobs:
             test "$rc" -eq 0
             # Nothing may surface as a deferred end-of-run failure: the timeout must land inside
             # PHPUnit's native handling, not in counit's after-the-summary block.
-            ! grep -qF 'already been reported as passed' /tmp/time-limit.err
+            if grep -qF 'already been reported as passed' /tmp/time-limit.err; then exit 1; fi
             case "$target" in
               TimeLimitAutomaticTest)
                 grep -qF 'Tests: 2, Assertions: 1, Risky: 1.' /tmp/time-limit.log
@@ -316,7 +316,7 @@ jobs:
             cat /tmp/backup.log /tmp/backup.err
             test "$rc" -eq 0
             # Nothing may surface as a deferred end-of-run failure.
-            ! grep -qF 'already been reported as passed' /tmp/backup.err
+            if grep -qF 'already been reported as passed' /tmp/backup.err; then exit 1; fi
             case "$target" in
               BackupGlobalsTest)           grep -qF 'OK (2 tests, 4 assertions)' /tmp/backup.log ;;
               BackupGlobalsManualTest)     grep -qF 'OK (2 tests, 3 assertions)' /tmp/backup.log ;;
@@ -361,7 +361,7 @@ jobs:
             ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/postcond.log 2> /tmp/postcond.err || rc=$?
             cat /tmp/postcond.log /tmp/postcond.err
             # Nothing may surface as a deferred end-of-run failure.
-            ! grep -qF 'already been reported as passed' /tmp/postcond.err
+            if grep -qF 'already been reported as passed' /tmp/postcond.err; then exit 1; fi
             case "$target" in
               PostConditionsTest)
                 test "$rc" -eq 0
@@ -382,7 +382,7 @@ jobs:
                 # The test fails natively with the BODY's message; the post-condition hook
                 # must never have run for the failed body.
                 grep -qF 'late failure' /tmp/postcond.log
-                ! grep -qF 'post-conditions must not run' /tmp/postcond.log ;;
+                if grep -qF 'post-conditions must not run' /tmp/postcond.log; then exit 1; fi ;;
             esac
           done
 
@@ -405,7 +405,7 @@ jobs:
             ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/output.log 2> /tmp/output.err || rc=$?
             cat /tmp/output.log /tmp/output.err
             # Nothing may surface as a deferred end-of-run failure.
-            ! grep -qF 'already been reported as passed' /tmp/output.err
+            if grep -qF 'already been reported as passed' /tmp/output.err; then exit 1; fi
             case "$target" in
               OutputExpectationTest)
                 test "$rc" -eq 0
@@ -485,7 +485,7 @@ jobs:
           # skip appears in the summary identically in both modes while STILL not being flagged.
           ./counit -c phpunit.xml.dist tests/regression/UselessTestExemptTest.php > /tmp/useless.log 2>&1
           cat /tmp/useless.log
-          ! grep -qF 'did not perform any assertions' /tmp/useless.log
+          if grep -qF 'did not perform any assertions' /tmp/useless.log; then exit 1; fi
           grep -qF 'Tests: 3, Assertions: 0, Skipped: 1.' /tmp/useless.log
           # Documented residual: an unobservable yield stays silent under Swoole (never a false
           # accusation), and is flagged natively without it.
@@ -520,8 +520,8 @@ jobs:
           cat /tmp/handler.log /tmp/handler.err
           test "$rc" -eq 0
           grep -qF 'OK (1 test, 1 assertion)' /tmp/handler.log
-          ! grep -qF 'did not remove its own error handlers' /tmp/handler.log
-          ! grep -qF 'already been reported as passed' /tmp/handler.err
+          if grep -qF 'did not remove its own error handlers' /tmp/handler.log; then exit 1; fi
+          if grep -qF 'already been reported as passed' /tmp/handler.err; then exit 1; fi
           # All four verdict kinds, before and after the first yield; --fail-on-risky exits 1.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/HandlerLeakTest.php > /tmp/handler.log 2>&1 || rc=$?
@@ -541,7 +541,7 @@ jobs:
           test "$rc" -eq 0
           grep -qF 'Tests: 4, Assertions: 4, Risky: 1.' /tmp/handler.log
           grep -qF 'HandlerAttributionTest::testALeaksAfterAShortYield' /tmp/handler.log
-          ! grep -qF 'testInnocentBystander' /tmp/handler.log
+          if grep -qF 'testInnocentBystander' /tmp/handler.log; then exit 1; fi
           # A leaked handler must not swallow a later test's deprecation.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/HandlerCanaryTest.php > /tmp/handler.log 2>&1 || rc=$?
@@ -569,7 +569,7 @@ jobs:
             test "$rc" -eq 0
             # Nothing may surface as a deferred end-of-run failure: every covered verdict is
             # native.
-            ! grep -qF 'already been reported as passed' /tmp/mock.err
+            if grep -qF 'already been reported as passed' /tmp/mock.err; then exit 1; fi
             case "$target" in
               MockExpectationTest)            grep -qF 'OK (3 tests, 3 assertions)' /tmp/mock.log ;;
               MockSetUpTest)                  grep -qF 'OK (1 test, 1 assertion)' /tmp/mock.log ;;
@@ -587,7 +587,7 @@ jobs:
             cat /tmp/mock-fail.log /tmp/mock-fail.err
             test "$rc" -eq 1
             grep -qF 'Tests: 1, Assertions: 1, Failures: 1.' /tmp/mock-fail.log
-            ! grep -qF 'already been reported as passed' /tmp/mock-fail.err
+            if grep -qF 'already been reported as passed' /tmp/mock-fail.err; then exit 1; fi
             case "$target" in
               # PHPUnit 13 reworded both verification failures; the 12.5 line keeps the
               # legacy phrasing, so each grep accepts either.
@@ -627,10 +627,10 @@ jobs:
             cat /tmp/diag.log /tmp/diag.err
             test "$rc" -eq 0
             # Raw PHP diagnostic text is the signature of an unconverted diagnostic ...
-            ! grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.log
-            ! grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.err
+            if grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.log; then exit 1; fi
+            if grep -qE '^(Deprecated|Warning|Notice): ' /tmp/diag.err; then exit 1; fi
             # ... and nothing may surface as a deferred end-of-run failure.
-            ! grep -qF 'already been reported as passed' /tmp/diag.err
+            if grep -qF 'already been reported as passed' /tmp/diag.err; then exit 1; fi
             case "$target" in
               PostYieldDiagnosticsTest)            grep -qF 'Tests: 6, Assertions: 6, Warnings: 2, Deprecations: 2, Notices: 1.' /tmp/diag.log ;;
               PostYieldDiagnosticsManualTest)      grep -qF 'Tests: 2, Assertions: 2, Warnings: 1, Deprecations: 1.' /tmp/diag.log ;;
@@ -662,9 +662,9 @@ jobs:
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/PostYieldUserErrorTest.php > /tmp/diag-ue.log 2> /tmp/diag-ue.err || rc=$?
           cat /tmp/diag-ue.log /tmp/diag-ue.err
-          ! grep -qF 'Fatal error' /tmp/diag-ue.log
-          ! grep -qF 'Fatal error' /tmp/diag-ue.err
-          ! grep -qF 'already been reported as passed' /tmp/diag-ue.err
+          if grep -qF 'Fatal error' /tmp/diag-ue.log; then exit 1; fi
+          if grep -qF 'Fatal error' /tmp/diag-ue.err; then exit 1; fi
+          if grep -qF 'already been reported as passed' /tmp/diag-ue.err; then exit 1; fi
           test "$rc" -eq 2
           # PHP 8.4 deprecated passing E_USER_ERROR to trigger_error(), so the fixture's own
           # call adds a deprecation there and on 8.5, but not on the 8.3 leg -- the error count
@@ -800,7 +800,7 @@ jobs:
             ./counit -c phpunit.xml.dist "tests/regression/${target}.php" > /tmp/late-fail.log 2> /tmp/late-fail.err || rc=$?
             cat /tmp/late-fail.log /tmp/late-fail.err
             test "$rc" -eq 2
-            ! grep -qF 'already been reported as passed' /tmp/late-fail.err
+            if grep -qF 'already been reported as passed' /tmp/late-fail.err; then exit 1; fi
             case "$target" in
               LateFailureTest)       grep -qF 'Tests: 5, Assertions: 8, Errors: 1, Failures: 2.' /tmp/late-fail.log
                                      grep -qF 'testDataSetFailsAfterYield@failing set' /tmp/late-fail.log ;;
