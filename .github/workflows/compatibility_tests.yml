@@ -36,7 +36,12 @@ jobs:
           coverage: pcov
 
       - name: Install Dependencies
-        run: composer install -nq --no-progress
+        run: |
+          composer install -nq --no-progress
+          # PHPUnit 8 only suggests php-invoker, which --enforce-time-limit needs (9 requires it).
+          if ./vendor/bin/phpunit --version | grep -qF 'PHPUnit 8.'; then
+            composer require "phpunit/php-invoker:^2.0 || ^3.1" -W -nq --no-progress
+          fi
 
       - name: Test Compatibility with PHPUnit
         # Assert the exact summary line, not just the exit code: a miscount or a risky test -- e.g.
@@ -758,8 +763,10 @@ jobs:
         # with measured wall-clock durations, as are the JUnit `time` attributes (see
         # HistoryCorrector / JunitXmlCorrector). Expected content is identical with and without
         # Swoole: the three post-yield defects present, the passing test absent from the
-        # defects, and every duration of this 0.2s-sleeping fixture at least 0.1s. PHPUnit 8
-        # serializes the cache as an object where 9 writes JSON, so its leg asserts textually.
+        # defects, and every duration of this 0.2s-sleeping fixture at least 0.1s. The cache
+        # format depends on the exact release, not the major version (8.0 and early 9.x serialize
+        # an object, late 8.5.x and 9.x write JSON), so it is detected from the file itself and
+        # the serialized form is asserted textually.
         run: |
           rm -f /tmp/rc.cache
           rc=0
@@ -773,7 +780,7 @@ jobs:
                   if ((float) $testCase->getAttribute("time") < 0.1) { exit(1); }
               }
           '
-          if ./vendor/bin/phpunit --version | grep -q 'PHPUnit 9'; then
+          if head -c 1 /tmp/rc.cache | grep -qF '{'; then
             php -r '
                 $prefix = "Deminy\\Counit\\Tests\\LateFailureTest::";
                 $cache  = json_decode((string) file_get_contents("/tmp/rc.cache"), true);
