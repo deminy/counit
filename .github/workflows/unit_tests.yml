@@ -1,13 +1,8 @@
 name: Unit Tests
 
-on:
-  push:
-  pull_request:
-  # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
-  # PHPUnit 13.4.1 broke counit's 1.x line silently, with no commit there to trigger CI.
-  schedule:
-    - cron: '0 6 * * 1'
-  workflow_dispatch:
+# GitHub runs scheduled workflows only from the default branch, so this branch's weekly runs are
+# started by master's weekly_0x_tests.yml, through workflow_dispatch.
+on: [ push, pull_request, workflow_dispatch ]
 
 jobs:
   ci:
@@ -57,7 +52,7 @@ jobs:
 
           # A run silently falling back to blocking mode still passes, with the blocking summary
           # (Assertions: 62, Skipped: 2): CoroutineGroupTest skips a different test inside a
-          # coroutine, so only the concurrent path produces this exact line. PHPUnit 13.4.1 broke
+          # coroutine, so only the concurrent path produces this exact line. PHPUnit 13.4.0 broke
           # the 1.x line's invocation routing that way without failing any CI step there.
           grep -qF 'Tests: 38, Assertions: 64, Skipped: 1.' /tmp/manual-swoole.log
           # Nor may a clean run print a "counit notice:" line: counit announces there when a
