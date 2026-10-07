@@ -1,0 +1,24 @@
+name: Weekly 0.x Tests
+
+# GitHub runs scheduled workflows only from the default branch (master), so the schedule blocks
+# in the 0.x branch's own workflows would never fire. This workflow starts them on 0.x instead,
+# once a week, so a PHPUnit 8/9 or Swoole release that breaks the 0.x line is noticed even when
+# nothing is pushed there.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Start the 0.x Test Workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run unit_tests.yml --ref 0.x -R "$GITHUB_REPOSITORY"
+          gh workflow run compatibility_tests.yml --ref 0.x -R "$GITHUB_REPOSITORY"

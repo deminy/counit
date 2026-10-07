@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
   # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
-  # PHPUnit 13.4.1 broke counit silently for runs resolving it, with no commit here to trigger CI.
+  # PHPUnit 13.4.0 broke counit silently for runs resolving it, with no commit here to trigger CI.
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
@@ -58,7 +58,7 @@ jobs:
 
           # A run silently falling back to blocking mode still passes, with the blocking summary
           # (Assertions: 62, Skipped: 2): CoroutineGroupTest skips a different test inside a
-          # coroutine, so only the concurrent path produces this exact line. PHPUnit 13.4.1 broke
+          # coroutine, so only the concurrent path produces this exact line. PHPUnit 13.4.0 broke
           # counit's invocation routing that way without failing any step here.
           grep -qF 'Tests: 38, Assertions: 64, Skipped: 1.' /tmp/manual-swoole.log
           # Nor may a clean run print a "counit notice:" line: counit announces there when a

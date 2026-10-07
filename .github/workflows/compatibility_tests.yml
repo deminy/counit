@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
   # Weekly, so a new PHPUnit release that breaks counit is noticed even when nothing is pushed:
-  # PHPUnit 13.4.1 broke counit silently for runs resolving it, with no commit here to trigger CI.
+  # PHPUnit 13.4.0 broke counit silently for runs resolving it, with no commit here to trigger CI.
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
           - swoole-stable
           - ""
 
-    name: PHPUnit ${{ matrix.env.phpunit }} on PHP ${{ matrix.env.php }}
+    name: PHPUnit ${{ matrix.env.phpunit }} on PHP ${{ matrix.env.php }}${{ matrix.extensions && ' with Swoole' || '' }}
 
     steps:
       - name: Checkout
