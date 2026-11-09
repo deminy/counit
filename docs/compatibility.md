@@ -108,6 +108,13 @@ What every ⚠️/❌ entry above means in practice — and the caveats behind s
     lines a coroutine runs while some joined test's coverage window is open are credited to that test (and subject
     to its `#[CoversClass]`/`#[CoversFunction]` target filtering). Aggregate percentages and line/method/class hit
     sets are reliable; `--coverage-xml`'s per-test breakdown is not.
+  * A verdict reported after a test's first yield reaches _PHPUnit_'s summary, listings, exit code and reports, but
+    not everything else that reacts to it: `--testdox` still shows such a test as passed (✔), and gives a late error
+    or skip a second row; and `onNotSuccessfulTest()` is not called for a failure or an error after the first yield.
+  * The risky check "This test does not define a code coverage target" (`requireCoverageMetadata`) runs at a test's
+    first yield, when the test still looks passed, so a test without a coverage target that fails, errors or skips
+    only afterwards is flagged risky as well — blocking mode exempts such tests. With `--fail-on-risky` that fails
+    the run; give such tests a coverage target (or `#[CoversNothing]`).
   * Some exceptions/errors are not handled/reported the same.
 * Tests using PHPUnit's process isolation (attributes _#[RunInSeparateProcess]_ and _#[RunTestsInSeparateProcesses]_,
   or option `--process-isolation`) behave and are counted exactly as under _PHPUnit_, but they gain nothing from this
@@ -417,7 +424,9 @@ What every ⚠️/❌ entry above means in practice — and the caveats behind s
   _PHPUnit_'s own (too early) hook timing untouched and prints a notice — once per class; silence it with environment
   variable _COUNIT_SILENCE_TEARDOWN_NOTICE=1_ — so the degradation is loud, never silent.
 * In the **manual approach**, _counit_ is not in charge of the test lifecycle, so _tearDown()_ still runs at the
-  body's first yield. Register cleanup with _Counit::defer(callable)_ inside the callback passed to
+  body's first yield. One consequence for the verdict: a _tearDown()_ that throws there is recorded while the body
+  still looks passed, so a body that then fails after its yield counts the test twice (an error and a failure),
+  where _PHPUnit_ ignores the _tearDown()_ Throwable of a test whose body already failed. Register cleanup with _Counit::defer(callable)_ inside the callback passed to
   _Counit::create()_ instead; deferred callbacks run inside the coroutine, in reverse registration order, once the
   body finishes — and at the same point in blocking mode. The automatic approach additionally offers the
   _tearDownCoroutine()_ hook (declared on _Deminy\Counit\TestCase_), which runs right after the test body, before the
