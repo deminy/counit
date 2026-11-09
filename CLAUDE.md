@@ -92,6 +92,10 @@ documented per feature in `docs/compatibility.md`.
   `tearDown()`/`#[After]` are *taken over*: PHPUnit's cached hook collection is pointed at a method nothing declares,
   and the hooks are replayed inside the coroutine right after the body.
   `tearDownCoroutine()` (and `Counit::defer()` for the manual approach) always observe a finished body.
+- The relocated hook replay mirrors whichever generation of PHPUnit's after-test hook rules the installed version
+  applies (`TestCase::AFTER_HOOK_RULES_*`): PHPUnit changed them in patch releases (12.5.40/13.4.3, 12.5.43/13.4.6),
+  so a hook skip or incomplete is a failure on older releases and a skip/incomplete on newer ones. The compatibility
+  workflow derives the expected outcomes from the PHPUnit version on its own.
 - `Helper::invocationRunsTests()` routes CLI commands (`--version`, `--help`, ...) and invalid usage to the blocking
   path; on any unexpected failure it keeps the concurrent path.
 - Extra joins: output expectations, plus the run-level `--disallow-test-output` (`OutputExpectations`) and
