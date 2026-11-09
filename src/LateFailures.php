@@ -12,10 +12,11 @@ use PHPUnit\Framework\AssertionFailedError;
 
 /**
  * The deferred half of test FAILURES: a body assertion/exception, a relocated
- * tearDown()/#[After] hook throwable (a hook *skip* included -- a test failure under blocking
- * PHPUnit, never a skip), or a Counit::defer() cleanup throwable that happened only after the
- * test's first yield, replayed through PHPUnit's own Test\Failed/Test\Errored events at the end
- * of the run.
+ * tearDown()/#[After] hook throwable (a hook *skip* or *incomplete* included under PHPUnit's
+ * older after-test hook rules, which fail the test for it -- as of 12.5.43 / 13.4.6 those go
+ * through LateSkips instead; see TestCase::AFTER_HOOK_RULES_*), or a Counit::defer() cleanup
+ * throwable that happened only after the test's first yield, replayed through PHPUnit's own
+ * Test\Failed/Test\Errored events at the end of the run.
  *
  * By the time such a Throwable exists, PHPUnit has already reported the test as passed, so the
  * verdict cannot be made native -- but everything PHPUnit derives from a failure comes from the
@@ -29,11 +30,13 @@ use PHPUnit\Framework\AssertionFailedError;
  * printed there and still forces a non-zero exit code.
  *
  * Classification mirrors blocking PHPUnit's own catch clauses: an AssertionError or
- * AssertionFailedError (PHPUnit's SkippedWithMessageException from a hook included -- it extends
- * AssertionFailedError) becomes Test\Failed, carrying the comparison failure for the diff
- * output; everything else becomes Test\Errored. One verdict per test, first wins (a body failure
- * beats a later cleanup failure, exactly as blocking PHPUnit reports one verdict per test); a
- * second Throwable of the same test stays in the script's block.
+ * AssertionFailedError (PHPUnit's SkippedWithMessageException from a hook included, under the
+ * older hook rules -- it extends AssertionFailedError), or an exception of a type the test
+ * registered as a failure (registerFailureType()), becomes Test\Failed, carrying the comparison
+ * failure for the diff output; everything else becomes Test\Errored. One verdict per test, first
+ * wins, as PHPUnit reports as of 12.5.43 / 13.4.6; a second Throwable of the same test stays in
+ * the script's block. (Before 12.5.43 / 13.4.6 PHPUnit counts a test twice when both its body and
+ * an after-test hook fail -- a documented residual.)
  *
  * Three compensations, all shared with LateSkips: the collector's `prepared` flag is set for the
  * emit's duration (Collector::testErrored() bumps numberOfTestsRun for unprepared tests --
@@ -53,7 +56,7 @@ final class LateFailures
      * Keyed by the Counit::$deferredFailures key, so a successful emit can drop exactly that
      * entry from the `counit` script's end-of-run block; insertion order is emission order.
      *
-     * @var array<string, array{test: Test, throwable: \Throwable}>
+     * @var array<string, array{test: Test, throwable: \Throwable, failure: bool}>
      */
     private static array $pending = [];
 
@@ -69,7 +72,7 @@ final class LateFailures
      * matching <failure>/<error> element into the report -- the corrector path works even when
      * the event could not be emitted.
      *
-     * @var list<array{test: Test, throwable: \Throwable}>
+     * @var list<array{test: Test, throwable: \Throwable, failure: bool}>
      */
     private static array $forReport = [];
 
@@ -78,21 +81,23 @@ final class LateFailures
      * Counit::$deferredFailures. No-op without a test value object (the entry then stays in the
      * script's block) or when the test already has a deferred verdict.
      */
-    public static function markDeferred(?Test $test, string $key, \Throwable $throwable): void
+    public static function markDeferred(?Test $test, string $key, \Throwable $throwable, bool $registeredFailure = false): void
     {
         if ($test === null || isset(self::$seenTests[$test->id()])) {
             return;
         }
 
-        self::$seenTests[$test->id()]              = true;
-        self::$pending[$key]                       = ['test' => $test, 'throwable' => $throwable];
-        self::$forReport[]                         = ['test' => $test, 'throwable' => $throwable];
+        $failure = $registeredFailure || self::isAssertionLevel($throwable);
+
+        self::$seenTests[$test->id()] = true;
+        self::$pending[$key]          = ['test' => $test, 'throwable' => $throwable, 'failure' => $failure];
+        self::$forReport[]            = ['test' => $test, 'throwable' => $throwable, 'failure' => $failure];
     }
 
     /**
      * The recorded verdicts, for JunitXmlCorrector.
      *
-     * @return list<array{test: Test, throwable: \Throwable}>
+     * @return list<array{test: Test, throwable: \Throwable, failure: bool}>
      */
     public static function forReport(): array
     {
@@ -126,7 +131,7 @@ final class LateFailures
                 $throwable = $deferred['throwable'];
 
                 try {
-                    if ($throwable instanceof \AssertionError || $throwable instanceof AssertionFailedError) {
+                    if ($deferred['failure']) {
                         EventFacade::emitter()->testFailed($deferred['test'], ThrowableBuilder::from($throwable), ComparisonFailureBuilder::from($throwable));
                     } else {
                         EventFacade::emitter()->testErrored($deferred['test'], ThrowableBuilder::from($throwable));
@@ -150,5 +155,14 @@ final class LateFailures
 
             LateSkips::pretendPrepared($previous);
         }
+    }
+
+    /**
+     * PHPUnit's own classification: an assertion-level Throwable fails the test, anything else
+     * errors it -- unless the test registered its type as a failure (see markDeferred()).
+     */
+    private static function isAssertionLevel(\Throwable $throwable): bool
+    {
+        return $throwable instanceof \AssertionError || $throwable instanceof AssertionFailedError;
     }
 }

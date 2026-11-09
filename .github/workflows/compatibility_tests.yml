@@ -308,6 +308,19 @@ jobs:
           if grep -qF 'already been reported as passed' /tmp/expected-exception-teardown.err; then exit 1; fi
           ./counit -c phpunit.xml.dist tests/regression/SynchronousJoinedTearDownTest.php | tee /tmp/sync-joined-teardown.log
           grep -qF 'OK (2 tests, 3 assertions)' /tmp/sync-joined-teardown.log
+          # An exception of a registered failure type fails the test, also after a yield. As of
+          # 12.5.43 / 13.4.6 PHPUnit no longer flags a failed test as risky for performing no
+          # assertions; before, both assertion-less tests are risky.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/RegisteredFailureTypeTest.php > /tmp/registered-failure.log 2> /tmp/registered-failure.err || rc=$?
+          cat /tmp/registered-failure.log /tmp/registered-failure.err
+          test "$rc" -eq 1
+          if [ "$afterHookRules" = outcome ]; then
+            grep -qF 'Tests: 3, Assertions: 1, Failures: 3.' /tmp/registered-failure.log
+          else
+            grep -qF 'Tests: 3, Assertions: 1, Failures: 3, Risky: 2.' /tmp/registered-failure.log
+          fi
+          if grep -qF 'already been reported as passed' /tmp/registered-failure.err; then exit 1; fi
 
       - name: Test Exception Expectation Semantics
         # A test whose expected exception is thrown only after a yield used to fail prematurely

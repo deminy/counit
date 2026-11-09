@@ -47,6 +47,11 @@ final class UselessTests
     private static bool $reportUselessTests = true;
 
     /**
+     * Whether the installed PHPUnit skips the "no assertions" check for a failed test.
+     */
+    private static bool $failedTestsExempt = false;
+
+    /**
      * @var array<string, Test>
      */
     private static array $tests = [];
@@ -69,6 +74,20 @@ final class UselessTests
     public static function initialize(Configuration $configuration): void
     {
         self::$reportUselessTests = $configuration->reportUselessTests();
+        self::$failedTestsExempt  = Helper::phpunitIncludes(['12.5' => '12.5.43', '13.4' => '13.4.6']);
+    }
+
+    /**
+     * A test reported as failed: exempt from the "did not perform any assertions" check as of
+     * PHPUnit 12.5.43 / 13.4.6, which skip it for a failed test (relevant for an exception of a
+     * registered failure type, which fails a test without an assertion). Earlier releases flag
+     * such a test, and so does counit then.
+     */
+    public static function markFailed(string $testId): void
+    {
+        if (self::$failedTestsExempt) {
+            self::markAborted($testId);
+        }
     }
 
     /**

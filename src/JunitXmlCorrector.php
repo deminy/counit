@@ -10,7 +10,6 @@ use PHPUnit\Event\Code\ThrowableBuilder;
 use PHPUnit\Event\DeferringDispatcher;
 use PHPUnit\Event\DirectDispatcher;
 use PHPUnit\Event\Facade as EventFacade;
-use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Logging\JUnit\JunitXmlLogger;
 use PHPUnit\Logging\JUnit\Subscriber as JunitSubscriber;
 use PHPUnit\Util\Xml;
@@ -324,7 +323,7 @@ class JunitXmlCorrector
         $verdicts = [];
 
         foreach (LateFailures::forReport() as $deferred) {
-            $verdicts[] = [$deferred['test'], $deferred['throwable'], null];
+            $verdicts[] = [$deferred['test'], $deferred['throwable'], $deferred['failure'] ? 'failure' : 'error'];
         }
         foreach (LateSkips::forReport() as $deferred) {
             $verdicts[] = [$deferred['test'], $deferred['throwable'], 'skipped'];
@@ -366,9 +365,8 @@ class JunitXmlCorrector
                 continue;
             }
 
-            // Mirrors JunitXmlLogger::handleFault(): failure for an assertion-level Throwable,
-            // error otherwise, with the same element text.
-            $type           = ($throwable instanceof \AssertionError || $throwable instanceof AssertionFailedError) ? 'failure' : 'error';
+            // Mirrors JunitXmlLogger::handleFault(): failure for a test PHPUnit reports as failed
+            // (see LateFailures), error otherwise, with the same element text.
             $eventThrowable = ThrowableBuilder::from($throwable);
             $buffer         = sprintf('%s::%s%s', $className, $name, PHP_EOL);
             $buffer .= trim($eventThrowable->description() . PHP_EOL . $eventThrowable->stackTrace());

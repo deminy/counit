@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Deminy\Counit;
 
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\IncompleteTest;
 use PHPUnit\Framework\SkippedTest;
 use PHPUnit\Framework\TestCase;
@@ -211,8 +212,17 @@ class Counit
                         } else {
                             $key                          = self::uniqueDeferredKey($description, self::$deferredFailures);
                             self::$deferredFailures[$key] = $e;
-                            LateFailures::markDeferred($testValueObject, $key, $e);
-                            self::markAbortedAfterReport($testId);
+                            $registeredFailure            = self::isRegisteredFailure($caller, $e);
+                            LateFailures::markDeferred($testValueObject, $key, $e, $registeredFailure);
+                            // An error exempts the test from the "no assertions" check; a failure
+                            // only as of PHPUnit 12.5.43 / 13.4.6 (see UselessTests::markFailed()).
+                            if ($registeredFailure || $e instanceof \AssertionError || $e instanceof AssertionFailedError) {
+                                if ($testId !== null) {
+                                    UselessTests::markFailed($testId);
+                                }
+                            } else {
+                                self::markAbortedAfterReport($testId);
+                            }
                         }
                     } else {
                         $caught = $e;
@@ -709,6 +719,39 @@ class Counit
         }
 
         return $key;
+    }
+
+    /**
+     * Whether $throwable is of a type the test registered as a failure (registerFailureType()):
+     * PHPUnit then reports the test as failed rather than errored, also without an assertion. The
+     * registry is private to PHPUnit's TestCase; if it cannot be read, a notice says so and the
+     * Throwable is classified as an error.
+     */
+    private static function isRegisteredFailure(mixed $caller, \Throwable $throwable): bool
+    {
+        if (!$caller instanceof TestCase) {
+            return false;
+        }
+
+        try {
+            $failureTypes = (new \ReflectionProperty(TestCase::class, 'failureTypes'))->getValue($caller);
+        } catch (\Throwable) {
+            $failureTypes = null;
+        }
+
+        if (!is_array($failureTypes)) {
+            Helper::notice('registered-failure-types', 'could not read a test\'s registered failure types (PHPUnit\'s internals have changed); an exception of a registered failure type thrown after the test\'s first yield is reported as an error instead of a failure.');
+
+            return false;
+        }
+
+        foreach (array_keys($failureTypes) as $failureType) {
+            if (is_string($failureType) && $throwable instanceof $failureType) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -242,6 +242,7 @@ final class CounitExtension implements Extension
                 #[\Override]
                 public function notify(TestFailed $event): void
                 {
+                    UselessTests::markFailed($event->test()->id());
                     CounitExtension::handleTestVerdict($event->test());
                 }
             });
