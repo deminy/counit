@@ -8,6 +8,37 @@ Two release series are maintained in parallel: the **1.x** series (branch `maste
 ~13.0, while the **0.x** series (branch `0.x`) is the maintenance line for PHPUnit ~8.0 / ~9.0. Tags carry no `v`
 prefix.
 
+## 1.1.6 - 2026-11-09
+
+Bug-fix release for the 1.x series: follows PHPUnit's changed after-test hook rules (12.5.43 / 13.4.6) and prepares
+for PHPUnit 13.5. Supported versions are unchanged (~12.5.24 on PHP >= 8.3, ~13.0 on PHP >= 8.4.1), and no test
+needs changing. **Upgrade if your lock file resolves PHPUnit 12.5.43 / 13.4.6 or later**: with 1.1.5, a skip or
+`markTestIncomplete()` in `tearDown()` / `#[After]` failed the test under Swoole, where PHPUnit now skips it.
+
+### Bug fixes
+
+- **After-test hook outcomes match PHPUnit's current rules.** PHPUnit changed how it treats a Throwable from
+  `tearDown()` / `#[After]` twice in patch releases (12.5.40 / 13.4.3 and 12.5.43 / 13.4.6); counit now mirrors
+  whichever rules the installed version applies, including PHPUnit 13.5's new deprecation for a skip or incomplete in
+  an after-test hook. (3e90fbe, 3eccbab)
+- **A test body that never yields leaves its after-test hooks to PHPUnit.** Before, an expected exception could make
+  counit drop a `tearDown()` failure (exit 0 where PHPUnit exits 1), and a joined test (a mock with `expects()`, an
+  output expectation) ran `tearDown()` twice. Under PHPUnit's older rules, a hook error after a failed body no longer
+  displaces the body's own failure. (3eccbab)
+- **`--timeout` (PHPUnit 13.4+) works under Swoole.** The time limit never fired; while it is set, the run is now
+  serialized so PHPUnit sees each test's real end, announced by a `counit notice:` line. (469a28a)
+- **Exceptions registered with `registerFailureType()` are reported as failures after a yield**, not errors (exit
+  code 1, `<failure>` in the JUnit report); a failed test is exempt from the "did not perform any assertions" check on
+  exactly the PHPUnit releases that exempt it. (5b379a1)
+
+### Changes
+
+- **[`docs/compatibility.md`](docs/compatibility.md) lists three remaining gaps** for verdicts reached after a yield:
+  TestDox output, `requireCoverageMetadata`'s risky check, and `onNotSuccessfulTest()`. Summaries and exit codes are
+  exact in all three. (489e457, b4d4962)
+
+**Full changelog**: https://github.com/deminy/counit/compare/1.1.5...1.1.6
+
 ## 1.1.5 - 2026-10-06
 
 Bug-fix release for the 1.x series: restores compatibility with PHPUnit 13.4 and prepares for PHPUnit 13.5. Supported
@@ -242,6 +273,27 @@ Major release: counit now targets **PHPUnit ~13.0** on **PHP >= 8.4.1**.
 - CI updated: PHPUnit ~13.0 matrix on PHP 8.4, syntax checks on PHP 8.4 and 8.5, static analysis with PHPStan ^2.0 at level 9. (2373e2d, 1ce4c0b)
 
 **Full changelog**: https://github.com/deminy/counit/compare/0.2.1...1.0.0
+
+## 0.3.5 - 2026-11-09
+
+Bug-fix release for the PHPUnit 8/9 maintenance series. Supported versions are unchanged (PHPUnit ~8.0 / ~9.0 on
+PHP >= 7.2), and no test needs changing. **Upgrade if you run PHP 7.2 or PHP 8.5.**
+
+### Bug fixes
+
+- **counit with Swoole works on PHP 7.2 again.** Every release since 0.3.0 died on the first test with "Call to
+  undefined function Deminy\Counit\hrtime()" (`hrtime()` is PHP 7.3+). (600d026)
+- **Manual-approach mock verification on PHP 8.5.** One `ReflectionProperty::setAccessible()` call, deprecated as of
+  PHP 8.5, leaked a deprecation into the first manual-approach test's output, or, with
+  `convertDeprecationsToExceptions`, disabled mock verification, so a violated `never()` passed. (600d026)
+
+### Changes
+
+- **No more silent fallbacks**, as in 1.1.5: when a PHPUnit internal counit depends on changes, the affected feature
+  still falls back rather than failing the run, but now says so in a one-line `counit notice:` on STDERR. A normal
+  run prints none; `COUNIT_SILENCE_TEARDOWN_NOTICE=1` silences them. (4b38495, 2126b78)
+
+**Full changelog**: https://github.com/deminy/counit/compare/0.3.4...0.3.5
 
 ## 0.3.4 - 2026-08-30
 
