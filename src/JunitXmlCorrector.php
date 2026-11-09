@@ -147,6 +147,7 @@ class JunitXmlCorrector
             }
         } catch (\Throwable $e) {
             // PHPUnit's internals have changed; leave the report as PHPUnit produced it.
+            Helper::notice('junit-report', 'could not correct the JUnit XML report (PHPUnit\'s internals have changed); it may miss verdicts, assertion counts and durations of tests that finished after their first yield.');
         }
     }
 

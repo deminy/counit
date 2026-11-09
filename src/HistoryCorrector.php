@@ -61,6 +61,7 @@ final class HistoryCorrector
             }
         } catch (\Throwable $t) {
             // PHPUnit's internals have changed; leave the cache as PHPUnit wrote it.
+            Helper::notice('result-cache', 'could not correct PHPUnit\'s result cache (PHPUnit\'s internals have changed); it may record short durations for tests that finished after their first yield.');
         }
     }
 

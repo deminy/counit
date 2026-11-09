@@ -297,10 +297,18 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
                 return;
             }
 
-            $corrected = false;
+            // PHPUnit's own result printer (DefaultResultPrinter on PHPUnit 9, the ResultPrinter
+            // class on 8) prints the total, so only a missing counter on it means changed
+            // internals. A custom --printer that does not extend it prints no total to correct.
+            $stockPrinter     = class_exists('PHPUnit\TextUI\DefaultResultPrinter') ? 'PHPUnit\TextUI\DefaultResultPrinter' : 'PHPUnit\TextUI\ResultPrinter';
+            $stockPrinterSeen = false;
+            $corrected        = false;
             foreach ($value as $listener) {
                 if (!is_object($listener)) {
                     continue;
+                }
+                if ($listener instanceof $stockPrinter) {
+                    $stockPrinterSeen = true;
                 }
 
                 $reflection = new \ReflectionObject($listener);
@@ -321,7 +329,7 @@ class CounitExtension implements AfterLastTestHook, BeforeFirstTestHook, BeforeT
                 }
             }
 
-            if (!$corrected) {
+            if (!$corrected && $stockPrinterSeen) {
                 self::announceUncorrectedAssertionCount($delta);
             }
         } catch (\ReflectionException $e) {

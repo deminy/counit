@@ -97,6 +97,8 @@ final class GlobalState
         foreach (['backupGlobals', 'backupStaticAttributes'] as $name) {
             try {
                 if (!property_exists(BaseTestCase::class, $name)) {
+                    self::announceUnreadableBackupSettings();
+
                     continue;
                 }
 
@@ -114,7 +116,13 @@ final class GlobalState
                 }
             } catch (\Throwable $e) {
                 // Leave the probe null; isBackedUp() then reports false for that flag.
+                self::announceUnreadableBackupSettings();
             }
         }
+    }
+
+    private static function announceUnreadableBackupSettings(): void
+    {
+        Helper::notice('global-state', 'could not read a test\'s @backupGlobals / @backupStaticAttributes settings (PHPUnit\'s internals have changed); such tests may have their global state restored while their body is still running.');
     }
 }
