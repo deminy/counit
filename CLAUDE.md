@@ -94,12 +94,15 @@ documented per feature in `docs/compatibility.md`.
   `tearDownCoroutine()` (and `Counit::defer()` for the manual approach) always observe a finished body.
 - The relocated hook replay mirrors whichever generation of PHPUnit's after-test hook rules the installed version
   applies (`TestCase::AFTER_HOOK_RULES_*`): PHPUnit changed them in patch releases (12.5.40/13.4.3, 12.5.43/13.4.6),
-  so a hook skip or incomplete is a failure on older releases and a skip/incomplete on newer ones. The compatibility
-  workflow derives the expected outcomes from the PHPUnit version on its own.
+  so a hook skip or incomplete is a failure on older releases and a skip/incomplete on newer ones (13.5 adds a PHPUnit
+  deprecation for it). The compatibility workflow derives the expected outcomes from the PHPUnit version on its own.
+  A body that finishes before its first yield replays nothing: its hooks are handed back to PHPUnit, whose own
+  invocation is still to come and has the correct timing (otherwise an expected exception looks like a failed body,
+  and a joined test runs `tearDown()` twice).
 - `Helper::invocationRunsTests()` routes CLI commands (`--version`, `--help`, ...) and invalid usage to the blocking
   path; on any unexpected failure it keeps the concurrent path.
-- Extra joins: output expectations, plus the run-level `--disallow-test-output` (`OutputExpectations`) and
-  `--repeat`/`--retry` (`VerdictSequencing`).
+- Extra joins: output expectations, plus the run-level `--disallow-test-output` (`OutputExpectations`),
+  `--repeat`/`--retry` and the run-wide `--timeout` (`VerdictSequencing`).
 - Late reporting replays PHPUnit's own events from `ExecutionFinished`: `LateSkips`, `LateFailures`, `UselessTests`,
   `HandlerIsolation` (error/exception-handler leak checks). Every late emitter must go through
   `JunitXmlCorrector::shieldLogger()`: an unshielded replayed event crashes the JUnit logger, whose state has already
@@ -153,8 +156,10 @@ counit reaches into PHPUnit internals (private properties, `@internal` classes) 
   as `Helper::hookMethods()`). PHPUnit 13.4.0 added a required `Emitter` constructor parameter to
   `CliArguments\Builder` and `Metadata\Api\HookMethods`; a bare `new` broke routing, the hook takeover and
   post-condition joins at once, and every run still exited 0.
-- New PHPUnit releases can move internals without notice; the weekly CI runs and the notice canary exist to catch
-  that. PHPUnit's parallel-execution work (planned for 13.5) wraps the event dispatcher's subscriber entries;
+- New PHPUnit releases can move internals, and change behavior counit mirrors, without notice -- even in patch
+  releases; the weekly CI runs and the notice canary exist to catch that. Gate version-specific behavior on
+  `Helper::phpunitIncludes()` (first release per maintained series), never on scattered version compares.
+  PHPUnit's parallel-execution work (planned for 13.5) wraps the event dispatcher's subscriber entries;
   `JunitXmlCorrector::registeredSubscribers()` reads both layouts.
 
 ## Test suites and approaches
