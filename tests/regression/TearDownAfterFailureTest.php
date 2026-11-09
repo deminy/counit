@@ -12,7 +12,8 @@ use Deminy\Counit\TestCase;
  * the test's own, counting the test twice; as of 12.5.43 / 13.4.6 the tearDown() outcome of a
  * test that did not pass is ignored. Under the coroutine runner the relocated hook must follow
  * whichever rule the installed PHPUnit applies. Run by the compatibility workflow with
- * mode-identical assertions.
+ * mode-identical assertions on 12.5.43 / 13.4.6 and later; before, counit reports one verdict per
+ * test and lists the second failure after the summary (a documented residual).
  *
  * @internal
  * @coversNothing

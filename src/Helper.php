@@ -207,6 +207,43 @@ class Helper
         fwrite(STDERR, 'counit notice: ' . $message . ' Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.' . PHP_EOL);
     }
 
+    /**
+     * Whether the installed PHPUnit includes a change that shipped in patch releases of its
+     * maintained lines -- PHPUnit has changed behavior counit mirrors that way, without any API to
+     * detect it. $firstReleases maps each series that received the change to its first release
+     * containing it (e.g. ['12.5' => '12.5.43', '13.4' => '13.4.6']); a series newer than every
+     * listed one includes it, an older or unlisted one does not. A development build of a listed
+     * series (e.g. "13.4-dev") counts as including it, as its branch has the change. If the
+     * version cannot be read, the change is assumed missing and a notice says so.
+     *
+     * @param non-empty-array<string, string> $firstReleases
+     *
+     * @internal this method is not covered by the backward compatibility promise for counit
+     */
+    public static function phpunitIncludes(array $firstReleases): bool
+    {
+        try {
+            $version = \PHPUnit\Runner\Version::id();
+            $series  = \PHPUnit\Runner\Version::series();
+        } catch (\Throwable) {
+            self::notice('phpunit-version', 'could not read PHPUnit\'s version; behavior that changed in recent PHPUnit releases (e.g. how a skip in tearDown() is reported) is mirrored as in older releases.');
+
+            return false;
+        }
+
+        if (isset($firstReleases[$series])) {
+            return preg_match('/^\d+\.\d+\.\d+/', $version) !== 1 || version_compare($version, $firstReleases[$series], '>=');
+        }
+
+        foreach (array_keys($firstReleases) as $listedSeries) {
+            if (version_compare($series, (string) $listedSeries, '<=')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static function getNewKey(): string
     {
         if (self::$prefix === '') {

@@ -223,15 +223,20 @@ jobs:
           #   skip-stops -- 12.5.40+ / 13.4.3+: a skip stops the remaining hooks (still a failure)
           #   outcome    -- 12.5.43+ / 13.4.6+ and every later line: a skip/incomplete is reported
           #                 as such, and a hook's outcome counts only when the test body passed
+          # 13.5 additionally reports a PHPUnit deprecation for a skip or an incomplete from an
+          # after-test hook. A development build ("13.4-dev") counts as its branch's newest code.
           phpunitVersion=$(./vendor/bin/phpunit --version | head -n 1 | cut -d ' ' -f 2)
+          [[ "$phpunitVersion" =~ ^[0-9]+\.[0-9]+ ]] || { echo "Cannot parse PHPUnit's version: '$phpunitVersion'"; exit 1; }
           afterHookRules=$(php -r '
               $v = $argv[1];
-              $s = implode(".", array_slice(explode(".", $v), 0, 2));
+              $s = implode(".", array_slice(explode(".", preg_replace("/-.*/", "", $v)), 0, 2));
+              $newest = preg_match("/^\\d+\\.\\d+\\.\\d+/", $v) !== 1;
               if (version_compare($s, "13.4", ">")) { echo "outcome"; exit; }
               $t = ["13.4" => ["13.4.6", "13.4.3"], "12.5" => ["12.5.43", "12.5.40"]][$s] ?? null;
-              echo $t === null ? "original" : (version_compare($v, $t[0], ">=") ? "outcome" : (version_compare($v, $t[1], ">=") ? "skip-stops" : "original"));
+              echo $t === null ? "original" : (($newest || version_compare($v, $t[0], ">=")) ? "outcome" : (version_compare($v, $t[1], ">=") ? "skip-stops" : "original"));
           ' "$phpunitVersion")
-          echo "PHPUnit $phpunitVersion: $afterHookRules after-test hook rules"
+          deprecation=$(php -r 'echo version_compare(preg_replace("/-.*/", ".0", $argv[1]), "13.5.0", ">=") ? "PHPUnit Deprecations: 1, " : "";' "$phpunitVersion")
+          echo "PHPUnit $phpunitVersion: $afterHookRules after-test hook rules${deprecation:+, deprecates skipping in after-test hooks}"
           # A skip from tearDown() after the body passed: a failure, then a skip.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/TearDownSkipTest.php > /tmp/teardown-skip.log 2> /tmp/teardown-skip.err || rc=$?
@@ -239,7 +244,7 @@ jobs:
           if grep -qF 'already been reported as passed' /tmp/teardown-skip.err; then exit 1; fi
           if [ "$afterHookRules" = outcome ]; then
             test "$rc" -eq 0
-            grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/teardown-skip.log
+            grep -qF "Tests: 2, Assertions: 2, ${deprecation}Skipped: 1." /tmp/teardown-skip.log
           else
             test "$rc" -eq 1
             grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
@@ -251,7 +256,7 @@ jobs:
           if grep -qF 'already been reported as passed' /tmp/teardown-incomplete.err; then exit 1; fi
           if [ "$afterHookRules" = outcome ]; then
             test "$rc" -eq 0
-            grep -qF 'Tests: 2, Assertions: 2, Incomplete: 1.' /tmp/teardown-incomplete.log
+            grep -qF "Tests: 2, Assertions: 2, ${deprecation}Incomplete: 1." /tmp/teardown-incomplete.log
           else
             test "$rc" -eq 1
             grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-incomplete.log
@@ -263,7 +268,7 @@ jobs:
           cat /tmp/after-skip-error.log /tmp/after-skip-error.err
           if grep -qF 'already been reported as passed' /tmp/after-skip-error.err; then exit 1; fi
           case "$afterHookRules" in
-            outcome)    test "$rc" -eq 0; grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/after-skip-error.log ;;
+            outcome)    test "$rc" -eq 0; grep -qF "Tests: 2, Assertions: 2, ${deprecation}Skipped: 1." /tmp/after-skip-error.log ;;
             skip-stops) test "$rc" -eq 1; grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/after-skip-error.log ;;
             *)          test "$rc" -eq 2; grep -qF 'Tests: 2, Assertions: 2, Errors: 1.' /tmp/after-skip-error.log ;;
           esac
@@ -285,6 +290,24 @@ jobs:
           else
             grep -qF 'Tests: 2, Assertions: 3, Failures: 2.' /tmp/teardown-after-failure.log
           fi
+          # A tearDown() error in a test whose body already failed after a yield is ignored under
+          # every generation of the rules: the test fails once, with its own failure.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/TearDownErrorAfterFailureTest.php > /tmp/teardown-error-after-failure.log 2> /tmp/teardown-error-after-failure.err || rc=$?
+          cat /tmp/teardown-error-after-failure.log /tmp/teardown-error-after-failure.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-error-after-failure.log
+          if grep -qF 'already been reported as passed' /tmp/teardown-error-after-failure.err; then exit 1; fi
+          # A body that never yields hands its hooks back to PHPUnit: a tearDown() failure after an
+          # expected exception still fails the test, and a joined test's tearDown() runs once.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/ExpectedExceptionTearDownTest.php > /tmp/expected-exception-teardown.log 2> /tmp/expected-exception-teardown.err || rc=$?
+          cat /tmp/expected-exception-teardown.log /tmp/expected-exception-teardown.err
+          test "$rc" -eq 1
+          grep -qF 'Tests: 2, Assertions: 3, Failures: 1.' /tmp/expected-exception-teardown.log
+          if grep -qF 'already been reported as passed' /tmp/expected-exception-teardown.err; then exit 1; fi
+          ./counit -c phpunit.xml.dist tests/regression/SynchronousJoinedTearDownTest.php | tee /tmp/sync-joined-teardown.log
+          grep -qF 'OK (2 tests, 3 assertions)' /tmp/sync-joined-teardown.log
 
       - name: Test Exception Expectation Semantics
         # A test whose expected exception is thrown only after a yield used to fail prematurely

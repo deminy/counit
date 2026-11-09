@@ -14,7 +14,6 @@ use PHPUnit\Framework\SkippedWithMessageException;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 use PHPUnit\Runner\HookMethod;
 use PHPUnit\Runner\HookMethodCollection;
-use PHPUnit\Runner\Version;
 use Swoole\Constant;
 use Swoole\Coroutine;
 
@@ -67,6 +66,11 @@ class TestCase extends BaseTestCase
      * Cached result of afterTestHookRules().
      */
     private static ?int $afterTestHookRules = null;
+
+    /**
+     * Cached result of markingInAfterTestHookIsDeprecated().
+     */
+    private static ?bool $markingInAfterTestHookIsDeprecated = null;
 
     /**
      * Per concrete test class: the after-test hook methods (tearDown() and #[After] methods, in
@@ -339,7 +343,13 @@ class TestCase extends BaseTestCase
             // to the native invocation -- exactly as for a joined #[Depends] producer.
             $useNativeAfterHooks = false;
 
-            Counit::create(function () use ($methodName, $testArguments, &$useNativeAfterHooks): void {
+            // Flipped once Counit::create() returns -- i.e. once the body first yielded. A body
+            // that finishes before its first yield runs entirely inside create(), so when its
+            // after-test hooks are due, runBare() has not regained control yet and its own hook
+            // invocation still lies ahead: the hooks are handed back to it then (see below).
+            $createReturned = false;
+
+            Counit::create(function () use ($methodName, $testArguments, &$useNativeAfterHooks, &$createReturned): void {
                 // How the body ended decides, under PHPUnit's newest rules, whether an after-test
                 // hook's Throwable counts at all; see invokeRelocatedAfterTestHooks().
                 $bodyThrowable = null;
@@ -368,8 +378,15 @@ class TestCase extends BaseTestCase
                         // Skipped when the hooks were handed back to PHPUnit for this test (see
                         // $useNativeAfterHooks), so they can never run twice.
                         // Flipped by reference from the join callback below, before this
-                        // coroutine can resume -- invisible to PHPStan.
-                        if (!$useNativeAfterHooks) { // @phpstan-ignore booleanNot.alwaysTrue
+                        // coroutine can resume.
+                        // A body that never yielded is handed back too: PHPUnit's own hook
+                        // invocation is still to come and has the correct timing, so it runs the
+                        // hooks once, with its exact rules -- an expected exception counts as a
+                        // passing body there, and a joined test cannot run them a second time.
+                        if (!$useNativeAfterHooks && !$createReturned) { // @phpstan-ignore booleanNot.alwaysTrue
+                            $useNativeAfterHooks = self::setAfterTestHookSuppression(false, static::class);
+                        }
+                        if (!$useNativeAfterHooks) {
                             $this->invokeRelocatedAfterTestHooks($bodyThrowable);
                         }
                     }
@@ -377,6 +394,7 @@ class TestCase extends BaseTestCase
             }, 1, function () use (&$useNativeAfterHooks): void {
                 $useNativeAfterHooks = self::setAfterTestHookSuppression(false, static::class);
             });
+            $createReturned = true;
 
             return null;
         }
@@ -567,6 +585,20 @@ class TestCase extends BaseTestCase
 
             $thrown = $failure;
 
+            // As of PHPUnit 13.5, marking a test skipped or incomplete from an after-test hook is
+            // deprecated: its own hook invocation reports that right after the call.
+            if (($failure instanceof SkippedTest || $failure instanceof IncompleteTest) && self::markingInAfterTestHookIsDeprecated()) {
+                $emitter->testTriggeredPhpunitDeprecation(
+                    $eventTest,
+                    sprintf(
+                        'Calling %s() in after-test method %s::%s() is deprecated and will no longer be possible in PHPUnit 14.',
+                        $failure instanceof IncompleteTest ? 'markTestIncomplete' : 'markTestSkipped',
+                        static::class,
+                        $methodName,
+                    ),
+                );
+            }
+
             // A skip never emits a failed-hook event; as of the outcome-aware rules, neither does
             // an incomplete (before, IncompleteTestError is just another AssertionFailedError).
             if ($failure instanceof SkippedTest
@@ -620,10 +652,18 @@ class TestCase extends BaseTestCase
             }
         }
 
-        // Before the outcome-aware rules, every hook Throwable -- a skip or an incomplete
-        // included, as PHPUnit's tearDown-phase handling catches them as AssertionFailedErrors --
-        // fails or errors the test, also one whose body already failed (PHPUnit then counts the
-        // test twice; this test's own verdict was emitted at the body's first yield).
+        // Before the outcome-aware rules, PHPUnit's tearDown phase fails the test for every
+        // assertion-level hook Throwable -- a skip or an incomplete included, both being
+        // AssertionFailedErrors there -- also when the body already failed (PHPUnit then counts
+        // the test twice; this test's own verdict was emitted at the body's first yield), while
+        // any other Throwable errors the test only when the body passed or skipped the test.
+        if ($rules !== self::AFTER_HOOK_RULES_OUTCOME_AWARE
+            && !($thrown instanceof AssertionFailedError || $thrown instanceof \AssertionError)
+            && $bodyThrowable !== null
+            && !($bodyThrowable instanceof SkippedWithMessageException)) {
+            return;
+        }
+
         $key = Counit::uniqueDeferredKey($description, Counit::$deferredFailures);
 
         Counit::$deferredFailures[$key] = $thrown;
@@ -632,42 +672,26 @@ class TestCase extends BaseTestCase
 
     /**
      * Which generation of PHPUnit's after-test hook rules the installed PHPUnit applies (see the
-     * AFTER_HOOK_RULES_* constants). PHPUnit changed them in patch releases of maintained lines
-     * without any API to detect the change, so the version decides: the 12.5 and 13.4 lines
-     * changed in 12.5.40/13.4.3 and again in 12.5.43/13.4.6, and every later line ships the newest
-     * rules. Lines that were no longer maintained by then (13.0 to 13.3) keep the original rules.
-     * If the version cannot be read, the original rules apply and a notice says so.
+     * AFTER_HOOK_RULES_* constants). PHPUnit changed them in patch releases of its maintained
+     * lines -- 12.5.40 / 13.4.3 and again 12.5.43 / 13.4.6 -- and every later line ships the newest
+     * rules; lines no longer maintained by then (13.0 to 13.3) keep the original ones.
      */
     private static function afterTestHookRules(): int
     {
-        if (self::$afterTestHookRules !== null) {
-            return self::$afterTestHookRules;
-        }
+        return self::$afterTestHookRules ??= match (true) {
+            Helper::phpunitIncludes(['12.5' => '12.5.43', '13.4' => '13.4.6'])  => self::AFTER_HOOK_RULES_OUTCOME_AWARE,
+            Helper::phpunitIncludes(['12.5' => '12.5.40', '13.4' => '13.4.3'])  => self::AFTER_HOOK_RULES_SKIP_STOPS,
+            default                                                             => self::AFTER_HOOK_RULES_ORIGINAL,
+        };
+    }
 
-        try {
-            $version = Version::id();
-            $series  = Version::series();
-        } catch (\Throwable) {
-            Helper::notice('after-test-hook-rules', 'could not read PHPUnit\'s version; a skip, an incomplete or a failure in tearDown() or an #[After] method after a test\'s first yield is reported under PHPUnit\'s original rules, which PHPUnit 12.5.43 / 13.4.6 and later replaced.');
-
-            return self::$afterTestHookRules = self::AFTER_HOOK_RULES_ORIGINAL;
-        }
-
-        if (version_compare($series, '13.4', '>')) {
-            $rules = self::AFTER_HOOK_RULES_OUTCOME_AWARE;
-        } elseif ($series === '13.4' || $series === '12.5') {
-            [$outcomeAware, $skipStops] = $series === '13.4' ? ['13.4.6', '13.4.3'] : ['12.5.43', '12.5.40'];
-
-            $rules = match (true) {
-                version_compare($version, $outcomeAware, '>=')  => self::AFTER_HOOK_RULES_OUTCOME_AWARE,
-                version_compare($version, $skipStops, '>=')     => self::AFTER_HOOK_RULES_SKIP_STOPS,
-                default                                         => self::AFTER_HOOK_RULES_ORIGINAL,
-            };
-        } else {
-            $rules = self::AFTER_HOOK_RULES_ORIGINAL;
-        }
-
-        return self::$afterTestHookRules = $rules;
+    /**
+     * Whether PHPUnit deprecates marking a test skipped or incomplete from an after-test hook (as
+     * of 13.5), so the replay must emit the same PHPUnit deprecation PHPUnit's own invocation does.
+     */
+    private static function markingInAfterTestHookIsDeprecated(): bool
+    {
+        return self::$markingInAfterTestHookIsDeprecated ??= Helper::phpunitIncludes(['13.5' => '13.5.0']);
     }
 
     /**
