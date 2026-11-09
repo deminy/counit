@@ -11,12 +11,15 @@ jobs:
       fail-fast: false
       matrix:
         env:
+          # PHP 7.2 is this branch's floor (and lacks functions newer PHP has, e.g. hrtime());
+          # PHP 8.5 its newest (where e.g. ReflectionProperty::setAccessible() is deprecated).
+          - {phpunit: "~8.0", php: "7.2"}
           - {phpunit: "~8.0.0", php: "7.4"}
           - {phpunit: "~8.0", php: "7.4"}
-          - {phpunit: "~8.0", php: "8.2"} # TODO: update to PHP 8.3.
+          - {phpunit: "~8.0", php: "8.5"}
           - {phpunit: "~9.0.0", php: "7.4"}
           - {phpunit: "~9.0", php: "7.4"}
-          - {phpunit: "~9.0", php: "8.2"} # TODO: update to PHP 8.3.
+          - {phpunit: "~9.0", php: "8.5"}
         extensions:
           - swoole-stable
           - ""

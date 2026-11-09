@@ -106,7 +106,12 @@ final class MockExpectations
             // reflecting a subclass, which would silently defeat the whole check.
             if (property_exists(BaseTestCase::class, 'mockObjects')) {
                 $property = new \ReflectionProperty(BaseTestCase::class, 'mockObjects');
-                $property->setAccessible(true);
+                if (PHP_VERSION_ID < 80100) {
+                    // A no-op since PHP 8.1 and deprecated since 8.5 -- where calling it inside a
+                    // test leaked the deprecation into the test's output, or disabled this probe
+                    // under convertDeprecationsToExceptions -- but required on PHP 7.2 to 8.0.
+                    $property->setAccessible(true);
+                }
 
                 self::$property = $property;
 

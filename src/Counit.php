@@ -119,7 +119,7 @@ class Counit
     private static $appliedCredits = [];
 
     /**
-     * Per test key: the hrtime(true) stamp taken when the test started (from the run's
+     * Per test key: the nanoseconds() stamp taken when the test started (from the run's
      * TestListener; create() stamps the first test itself, whose startTest() fired before the
      * listener could be attached). Together with the coroutine-finish stamp this yields the
      * test's real wall-clock duration -- what a blocking run would have measured -- where
@@ -736,7 +736,7 @@ class Counit
     public static function recordTestStarting(int $key): void
     {
         if (!isset(self::$testStartTimes[$key])) {
-            self::$testStartTimes[$key] = (int) hrtime(true);
+            self::$testStartTimes[$key] = self::nanoseconds();
         }
     }
 
@@ -763,6 +763,15 @@ class Counit
     }
 
     /**
+     * A monotonic timestamp in nanoseconds, for measuring test durations: hrtime() where it exists
+     * (PHP 7.3+), microtime() on PHP 7.2, which this branch supports but which lacks hrtime().
+     */
+    private static function nanoseconds(): int
+    {
+        return function_exists('hrtime') ? (int) hrtime(true) : (int) (microtime(true) * 1e9);
+    }
+
+    /**
      * A test whose body failed, skipped or went incomplete only after PHPUnit had already
      * reported it (see $deferredFailures/$deferredSkips). PHPUnit 8/9 exempt every
      * non-passing test from the "did not perform any assertions" check, so the deferred pass
@@ -786,7 +795,7 @@ class Counit
             return;
         }
 
-        $seconds = ((int) hrtime(true) - self::$testStartTimes[$key]) / 1000000000;
+        $seconds = (self::nanoseconds() - self::$testStartTimes[$key]) / 1000000000;
 
         if (!isset(self::$testDurations[$key]) || self::$testDurations[$key]['seconds'] < $seconds) {
             self::$testDurations[$key] = ['test' => $test, 'seconds' => $seconds];
