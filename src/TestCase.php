@@ -8,10 +8,13 @@ use PHPUnit\Event\Code\ClassMethod;
 use PHPUnit\Event\Code\ThrowableBuilder;
 use PHPUnit\Event\Facade as EventFacade;
 use PHPUnit\Framework\AssertionFailedError;
+use PHPUnit\Framework\IncompleteTest;
 use PHPUnit\Framework\SkippedTest;
+use PHPUnit\Framework\SkippedWithMessageException;
 use PHPUnit\Framework\TestCase as BaseTestCase;
 use PHPUnit\Runner\HookMethod;
 use PHPUnit\Runner\HookMethodCollection;
+use PHPUnit\Runner\Version;
 use Swoole\Constant;
 use Swoole\Coroutine;
 
@@ -32,9 +35,38 @@ class TestCase extends BaseTestCase
     private const AFTER_HOOKS_SUPPRESSED = '__counitAfterTestHooksRunInsideTheCoroutine';
 
     /**
+     * The generations of PHPUnit's rules for a Throwable thrown by an after-test hook (tearDown()
+     * and #[After] methods), which invokeRelocatedAfterTestHooks() must mirror; see
+     * afterTestHookRules(). In every generation PHPUnit stops calling the remaining hooks at the
+     * first hook that fails or errors.
+     *
+     * Original rules: a skip does not stop the remaining hooks (a later hook's Throwable replaces
+     * it), and a skip or an incomplete counts as a test failure.
+     */
+    private const AFTER_HOOK_RULES_ORIGINAL = 1;
+
+    /**
+     * As of PHPUnit 12.5.40 / 13.4.3: a skip also stops the remaining hooks; it still counts as a
+     * test failure.
+     */
+    private const AFTER_HOOK_RULES_SKIP_STOPS = 2;
+
+    /**
+     * As of PHPUnit 12.5.43 / 13.4.6: a skip or an incomplete stops the remaining hooks and is
+     * reported as such; a failed PHP assert() counts as a failure; and a hook's outcome counts only
+     * when the test body passed (or, for a failure or an error, when the body skipped the test).
+     */
+    private const AFTER_HOOK_RULES_OUTCOME_AWARE = 3;
+
+    /**
      * @var array<string, mixed>
      */
     protected static array $coroutineOptions = [];
+
+    /**
+     * Cached result of afterTestHookRules().
+     */
+    private static ?int $afterTestHookRules = null;
 
     /**
      * Per concrete test class: the after-test hook methods (tearDown() and #[After] methods, in
@@ -277,14 +309,24 @@ class TestCase extends BaseTestCase
                 $restored = self::setAfterTestHookSuppression(false, static::class);
 
                 return Counit::createAndJoin(function () use ($methodName, $testArguments, $restored): mixed {
+                    $bodyThrowable = null;
+
                     try {
                         return parent::invokeTestMethod($methodName, $testArguments);
+                    } catch (\Throwable $t) {
+                        $bodyThrowable = $t;
+
+                        throw $t;
                     } finally {
                         try {
                             $this->tearDownCoroutine();
+                        } catch (\Throwable $t) {
+                            $bodyThrowable ??= $t;
+
+                            throw $t;
                         } finally {
                             if (!$restored) {
-                                $this->invokeRelocatedAfterTestHooks();
+                                $this->invokeRelocatedAfterTestHooks($bodyThrowable);
                             }
                         }
                     }
@@ -298,8 +340,16 @@ class TestCase extends BaseTestCase
             $useNativeAfterHooks = false;
 
             Counit::create(function () use ($methodName, $testArguments, &$useNativeAfterHooks): void {
+                // How the body ended decides, under PHPUnit's newest rules, whether an after-test
+                // hook's Throwable counts at all; see invokeRelocatedAfterTestHooks().
+                $bodyThrowable = null;
+
                 try {
                     parent::invokeTestMethod($methodName, $testArguments);
+                } catch (\Throwable $t) {
+                    $bodyThrowable = $t;
+
+                    throw $t;
                 } finally {
                     try {
                         // Runs inside the coroutine, strictly after the test body -- pass or fail
@@ -308,6 +358,10 @@ class TestCase extends BaseTestCase
                         // thrown here before the first yield errors the test synchronously; after
                         // a yield it is queued as a deferred failure and forces exit code 1.
                         $this->tearDownCoroutine();
+                    } catch (\Throwable $t) {
+                        $bodyThrowable ??= $t;
+
+                        throw $t;
                     } finally {
                         // The relocated tearDown()/#[After] hooks run last, even when the body or
                         // tearDownCoroutine() threw -- the same guarantee PHPUnit itself gives.
@@ -316,7 +370,7 @@ class TestCase extends BaseTestCase
                         // Flipped by reference from the join callback below, before this
                         // coroutine can resume -- invisible to PHPStan.
                         if (!$useNativeAfterHooks) { // @phpstan-ignore booleanNot.alwaysTrue
-                            $this->invokeRelocatedAfterTestHooks();
+                            $this->invokeRelocatedAfterTestHooks($bodyThrowable);
                         }
                     }
                 }
@@ -466,19 +520,23 @@ class TestCase extends BaseTestCase
     /**
      * Invokes the after-test hooks taken over from PHPUnit, mirroring its own invocation exactly:
      * same order, same events (afterTestMethodCalled/Failed/Errored/Finished), same
-     * stop-at-first-failing-hook rule, same failure classification. The one deliberate difference:
-     * a Throwable from a hook is never rethrown into the test-body path -- PHPUnit would match it
+     * stop-at-first-failing-hook rule, same outcome -- under whichever generation of these rules
+     * the installed PHPUnit applies (see afterTestHookRules()). The one deliberate difference: a
+     * Throwable from a hook is never rethrown into the test-body path -- PHPUnit would match it
      * against the test's expectException() expectation there (letting a test falsely pass on an
-     * exception its tearDown() threw), so it is queued as a deferred failure instead, reported
-     * after the summary with exit code 1.
+     * exception its tearDown() threw) -- so the outcome is reported late instead: as a skip or an
+     * incomplete through LateSkips, as a failure or an error through LateFailures.
+     *
+     * $bodyThrowable is what the test body (or tearDownCoroutine()) threw, null when it passed.
      */
-    private function invokeRelocatedAfterTestHooks(): void
+    private function invokeRelocatedAfterTestHooks(?\Throwable $bodyThrowable = null): void
     {
         $methods = self::$relocatedAfterHooks[static::class] ?? [];
         if ($methods === []) {
             return;
         }
 
+        $rules          = self::afterTestHookRules();
         $emitter        = EventFacade::emitter();
         $eventTest      = $this->valueObjectForEvents();
         $reflector      = new \ReflectionClass(static::class);
@@ -503,44 +561,113 @@ class TestCase extends BaseTestCase
             $emitter->afterTestMethodCalled($eventTest, $methodInvoked);
             $methodsInvoked[] = $methodInvoked;
 
-            if ($failure instanceof SkippedTest) {
-                // Blocking PHPUnit treats a skip signalled from an after-test hook as a test
-                // FAILURE (SkippedWithMessageException is an AssertionFailedError caught by
-                // runBare()'s tearDown-phase handling) -- it never becomes a skip. This test's
-                // verdict was already emitted at the body's first yield, so the closest match is
-                // the deferred-failure path: reported after the summary, with exit code 1.
-                // Mirroring PHPUnit's own loop, the skip stops neither hook invocation nor emits
-                // a failed-hook event, and a later hook's Throwable takes precedence over it.
-                // (A joined #[Depends] producer does not take this path: its hooks run natively,
-                // with PHPUnit's own semantics.)
-                $thrown = $failure;
-
+            if ($failure === null) {
                 continue;
             }
 
-            if ($failure !== null) {
-                if ($failure instanceof AssertionFailedError) {
-                    $emitter->afterTestMethodFailed($eventTest, $methodInvoked, ThrowableBuilder::from($failure));
-                } else {
-                    $emitter->afterTestMethodErrored($eventTest, $methodInvoked, ThrowableBuilder::from($failure));
-                }
-                $thrown = $failure;
+            $thrown = $failure;
 
-                break; // PHPUnit stops at the first failing after-test hook.
+            // A skip never emits a failed-hook event; as of the outcome-aware rules, neither does
+            // an incomplete (before, IncompleteTestError is just another AssertionFailedError).
+            if ($failure instanceof SkippedTest
+                || ($rules === self::AFTER_HOOK_RULES_OUTCOME_AWARE && $failure instanceof IncompleteTest)) {
+                if ($rules === self::AFTER_HOOK_RULES_ORIGINAL && $failure instanceof SkippedTest) {
+                    continue; // The original rules keep calling the remaining hooks after a skip.
+                }
+
+                break;
             }
+
+            $failed = $failure instanceof AssertionFailedError
+                || ($rules === self::AFTER_HOOK_RULES_OUTCOME_AWARE && $failure instanceof \AssertionError);
+            if ($failed) {
+                $emitter->afterTestMethodFailed($eventTest, $methodInvoked, ThrowableBuilder::from($failure));
+            } else {
+                $emitter->afterTestMethodErrored($eventTest, $methodInvoked, ThrowableBuilder::from($failure));
+            }
+
+            break; // PHPUnit stops at the first failing after-test hook.
         }
 
         // Unlike PHPUnit's own loop, this one appends to $methodsInvoked on every iteration (the
         // skip rule was already applied at takeover time), so the list is never empty here.
         $emitter->afterTestMethodFinished($eventTest, ...$methodsInvoked);
 
-        if ($thrown !== null) {
-            $description = sprintf('%s::%s (after-test hooks)', static::class, $this->nameWithDataSet());
-            $key         = Counit::uniqueDeferredKey($description, Counit::$deferredFailures);
-
-            Counit::$deferredFailures[$key] = $thrown;
-            LateFailures::markDeferred($eventTest, $key, $thrown);
+        if ($thrown === null) {
+            return;
         }
+
+        $description      = sprintf('%s::%s (after-test hooks)', static::class, $this->nameWithDataSet());
+        $skipOrIncomplete = ($thrown instanceof SkippedTest) || ($thrown instanceof IncompleteTest);
+
+        if ($rules === self::AFTER_HOOK_RULES_OUTCOME_AWARE) {
+            // Mirrors TestCase::tearDownTest() as of PHPUnit 12.5.43 / 13.4.6: a hook's outcome
+            // counts only for a test whose body passed -- a failure or an error also for a test
+            // whose body skipped it -- and a skip or an incomplete is reported as such.
+            $bodyPassed  = $bodyThrowable === null;
+            $bodySkipped = $bodyThrowable instanceof SkippedWithMessageException;
+            if (!$bodyPassed && ($skipOrIncomplete || !$bodySkipped)) {
+                return;
+            }
+
+            if ($skipOrIncomplete) {
+                $key = Counit::uniqueDeferredKey($description, Counit::$deferredSkips);
+
+                Counit::$deferredSkips[$key] = $thrown;
+                LateSkips::markDeferred($eventTest, $key, $thrown);
+
+                return;
+            }
+        }
+
+        // Before the outcome-aware rules, every hook Throwable -- a skip or an incomplete
+        // included, as PHPUnit's tearDown-phase handling catches them as AssertionFailedErrors --
+        // fails or errors the test, also one whose body already failed (PHPUnit then counts the
+        // test twice; this test's own verdict was emitted at the body's first yield).
+        $key = Counit::uniqueDeferredKey($description, Counit::$deferredFailures);
+
+        Counit::$deferredFailures[$key] = $thrown;
+        LateFailures::markDeferred($eventTest, $key, $thrown);
+    }
+
+    /**
+     * Which generation of PHPUnit's after-test hook rules the installed PHPUnit applies (see the
+     * AFTER_HOOK_RULES_* constants). PHPUnit changed them in patch releases of maintained lines
+     * without any API to detect the change, so the version decides: the 12.5 and 13.4 lines
+     * changed in 12.5.40/13.4.3 and again in 12.5.43/13.4.6, and every later line ships the newest
+     * rules. Lines that were no longer maintained by then (13.0 to 13.3) keep the original rules.
+     * If the version cannot be read, the original rules apply and a notice says so.
+     */
+    private static function afterTestHookRules(): int
+    {
+        if (self::$afterTestHookRules !== null) {
+            return self::$afterTestHookRules;
+        }
+
+        try {
+            $version = Version::id();
+            $series  = Version::series();
+        } catch (\Throwable) {
+            Helper::notice('after-test-hook-rules', 'could not read PHPUnit\'s version; a skip, an incomplete or a failure in tearDown() or an #[After] method after a test\'s first yield is reported under PHPUnit\'s original rules, which PHPUnit 12.5.43 / 13.4.6 and later replaced.');
+
+            return self::$afterTestHookRules = self::AFTER_HOOK_RULES_ORIGINAL;
+        }
+
+        if (version_compare($series, '13.4', '>')) {
+            $rules = self::AFTER_HOOK_RULES_OUTCOME_AWARE;
+        } elseif ($series === '13.4' || $series === '12.5') {
+            [$outcomeAware, $skipStops] = $series === '13.4' ? ['13.4.6', '13.4.3'] : ['12.5.43', '12.5.40'];
+
+            $rules = match (true) {
+                version_compare($version, $outcomeAware, '>=')  => self::AFTER_HOOK_RULES_OUTCOME_AWARE,
+                version_compare($version, $skipStops, '>=')     => self::AFTER_HOOK_RULES_SKIP_STOPS,
+                default                                         => self::AFTER_HOOK_RULES_ORIGINAL,
+            };
+        } else {
+            $rules = self::AFTER_HOOK_RULES_ORIGINAL;
+        }
+
+        return self::$afterTestHookRules = $rules;
     }
 
     /**

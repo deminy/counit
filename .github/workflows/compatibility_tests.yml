@@ -197,12 +197,11 @@ jobs:
         # native invocation: tearDown() still runs (a guard test asserts the side effect), a
         # Throwable it raises after the failed setUp() is swallowed (the setUp() error stands),
         # and the class's next test gets the relocated replay again -- identical output with and
-        # without Swoole. (2) A skip signalled from tearDown() after a passing body is a test
-        # FAILURE under blocking PHPUnit, never a skip; under Swoole the verdict only exists
-        # after the test's report and is replayed as PHPUnit's own Test\Failed event (see
-        # LateFailures -- PHPUnit's SkippedWithMessageException extends AssertionFailedError, so
-        # the classification is upstream's own), converging the summary and exit code with
-        # blocking mode exactly.
+        # without Swoole. (2) A skip, an incomplete or a failure from an after-test hook: under
+        # Swoole the verdict only exists after the test's report and is replayed as PHPUnit's own
+        # event (LateSkips/LateFailures), following whichever generation of PHPUnit's after-test
+        # hook rules the installed version applies -- converging the summary and exit code with
+        # blocking mode, except for the one documented residual below.
         run: |
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/SetUpFailureHooksTest.php > /tmp/setup-fail.log 2> /tmp/setup-fail.err || rc=$?
@@ -216,14 +215,76 @@ jobs:
           if grep -qF 'must be swallowed' /tmp/setup-fail.err; then exit 1; fi
           # ... and nothing may surface as a deferred end-of-run failure.
           if grep -qF 'already been reported as passed' /tmp/setup-fail.err; then exit 1; fi
+          # PHPUnit changed how it treats a Throwable from an after-test hook twice, in patch
+          # releases of its maintained lines (see the AFTER_HOOK_RULES_* constants in
+          # Deminy\Counit\TestCase), so the expected outcomes depend on the installed version.
+          # Derived here from PHPUnit's version on its own, independently of counit's code:
+          #   original   -- a skip does not stop the remaining hooks; skip/incomplete = failure
+          #   skip-stops -- 12.5.40+ / 13.4.3+: a skip stops the remaining hooks (still a failure)
+          #   outcome    -- 12.5.43+ / 13.4.6+ and every later line: a skip/incomplete is reported
+          #                 as such, and a hook's outcome counts only when the test body passed
+          phpunitVersion=$(./vendor/bin/phpunit --version | head -n 1 | cut -d ' ' -f 2)
+          afterHookRules=$(php -r '
+              $v = $argv[1];
+              $s = implode(".", array_slice(explode(".", $v), 0, 2));
+              if (version_compare($s, "13.4", ">")) { echo "outcome"; exit; }
+              $t = ["13.4" => ["13.4.6", "13.4.3"], "12.5" => ["12.5.43", "12.5.40"]][$s] ?? null;
+              echo $t === null ? "original" : (version_compare($v, $t[0], ">=") ? "outcome" : (version_compare($v, $t[1], ">=") ? "skip-stops" : "original"));
+          ' "$phpunitVersion")
+          echo "PHPUnit $phpunitVersion: $afterHookRules after-test hook rules"
+          # A skip from tearDown() after the body passed: a failure, then a skip.
           rc=0
           ./counit -c phpunit.xml.dist tests/regression/TearDownSkipTest.php > /tmp/teardown-skip.log 2> /tmp/teardown-skip.err || rc=$?
           cat /tmp/teardown-skip.log /tmp/teardown-skip.err
-          test "$rc" -eq 1
-          grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
           if grep -qF 'already been reported as passed' /tmp/teardown-skip.err; then exit 1; fi
-          # In neither mode may the skip be honored as a skip.
-          if grep -qF 'Skipped:' /tmp/teardown-skip.log; then exit 1; fi
+          if [ "$afterHookRules" = outcome ]; then
+            test "$rc" -eq 0
+            grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/teardown-skip.log
+          else
+            test "$rc" -eq 1
+            grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-skip.log
+          fi
+          # markTestIncomplete() from tearDown() after the body passed: a failure, then incomplete.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/TearDownIncompleteTest.php > /tmp/teardown-incomplete.log 2> /tmp/teardown-incomplete.err || rc=$?
+          cat /tmp/teardown-incomplete.log /tmp/teardown-incomplete.err
+          if grep -qF 'already been reported as passed' /tmp/teardown-incomplete.err; then exit 1; fi
+          if [ "$afterHookRules" = outcome ]; then
+            test "$rc" -eq 0
+            grep -qF 'Tests: 2, Assertions: 2, Incomplete: 1.' /tmp/teardown-incomplete.log
+          else
+            test "$rc" -eq 1
+            grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/teardown-incomplete.log
+          fi
+          # tearDown() skips, then an #[After] method errors: the error wins, then the skip stops
+          # the remaining hooks (a failure), then the skip is reported as a skip.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/AfterHookSkipThenErrorTest.php > /tmp/after-skip-error.log 2> /tmp/after-skip-error.err || rc=$?
+          cat /tmp/after-skip-error.log /tmp/after-skip-error.err
+          if grep -qF 'already been reported as passed' /tmp/after-skip-error.err; then exit 1; fi
+          case "$afterHookRules" in
+            outcome)    test "$rc" -eq 0; grep -qF 'Tests: 2, Assertions: 2, Skipped: 1.' /tmp/after-skip-error.log ;;
+            skip-stops) test "$rc" -eq 1; grep -qF 'Tests: 2, Assertions: 2, Failures: 1.' /tmp/after-skip-error.log ;;
+            *)          test "$rc" -eq 2; grep -qF 'Tests: 2, Assertions: 2, Errors: 1.' /tmp/after-skip-error.log ;;
+          esac
+          # tearDown() fails in a test whose body already failed after a yield: the newest rules
+          # ignore the tearDown() failure, matching in both modes. The older rules count the test
+          # twice; under Swoole counit reports one verdict per test natively and the second
+          # failure in its block after the summary (a documented residual) -- the run fails either
+          # way.
+          rc=0
+          ./counit -c phpunit.xml.dist tests/regression/TearDownAfterFailureTest.php > /tmp/teardown-after-failure.log 2> /tmp/teardown-after-failure.err || rc=$?
+          cat /tmp/teardown-after-failure.log /tmp/teardown-after-failure.err
+          test "$rc" -eq 1
+          if [ "$afterHookRules" = outcome ]; then
+            grep -qF 'Tests: 2, Assertions: 3, Failures: 1.' /tmp/teardown-after-failure.log
+            if grep -qF 'already been reported as passed' /tmp/teardown-after-failure.err; then exit 1; fi
+          elif php -r 'exit(extension_loaded("swoole") ? 0 : 1);'; then
+            grep -qF 'Tests: 2, Assertions: 3, Failures: 1.' /tmp/teardown-after-failure.log
+            grep -qF 'already been reported as passed' /tmp/teardown-after-failure.err
+          else
+            grep -qF 'Tests: 2, Assertions: 3, Failures: 2.' /tmp/teardown-after-failure.log
+          fi
 
       - name: Test Exception Expectation Semantics
         # A test whose expected exception is thrown only after a yield used to fail prematurely
