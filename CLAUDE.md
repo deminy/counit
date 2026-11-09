@@ -278,7 +278,9 @@ Docblocks must not contain the literal `*/` — e.g. writing `--stop-on-*/--repe
   Swoole. PHPUnit ~12.5.24, ~13.0.0 and ~13.0 on `master`; ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on `0.x`.
 - `compatibility_tests.yml` — the `compatibility` suite plus the `tests/regression/` steps on GitHub-hosted runners,
   with and without Swoole (job names say which). On `master`: PHPUnit 12.5.24 and ~12.5.24 on PHP 8.3, ~13.0.0 and
-  ~13.0 on PHP 8.4. On `0.x`: PHPUnit ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on PHP 7.4, plus ~8.0 and ~9.0 on PHP 8.2.
+  ~13.0 on PHP 8.4. On `0.x`: PHPUnit ~8.0.0, ~8.0, ~9.0.0 and ~9.0 on PHP 7.4, plus ~8.0 on PHP 7.2 (the floor) and
+  ~8.0 and ~9.0 on PHP 8.5 (the newest). PHP 7.2 lacks functions such as `hrtime()`, and PHP 8.5 deprecates
+  `ReflectionProperty::setAccessible()` (call it only under `PHP_VERSION_ID < 80100`), so syntax checks alone miss both.
 - `static_analysis.yml` — PHPStan, on PHP 8.4 (`master`) or 8.1 (`0.x`).
 - `coding_style_checks.yml` — php-cs-fixer, as above.
 - `syntax_checks.yml` — `phplint` on PHP 8.3–8.5 (`master`) or 7.2–8.3 (`0.x`).
