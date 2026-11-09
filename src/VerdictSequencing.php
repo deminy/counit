@@ -9,15 +9,20 @@ use PHPUnit\TextUI\Configuration\Configuration;
 /**
  * The run-level join switch for PHPUnit's verdict-sequencing options: the --stop-on-* family
  * (defect/error/failure/warning/risky/deprecation/notice/skipped/incomplete, threshold forms
- * included) and, on PHPUnit 13, --repeat/--retry.
+ * included), on PHPUnit 13 --repeat/--retry, and on PHPUnit 13.4+ --timeout (a time limit for the
+ * whole run).
  *
  * All of these make PHPUnit decide something BETWEEN tests from the verdicts it has so far:
  * whether to start the next test at all (TestSuite::run() consults shouldStop() before each
  * one), whether to run another repetition (--repeat stops a test's repetitions at its first
- * failure), or whether to retry (--retry re-attempts until the first success). Under counit a
+ * failure), whether to retry (--retry re-attempts until the first success), or whether the
+ * run's time limit is exceeded (--timeout checks its deadline as each test finishes, and arms an
+ * alarm for the remaining time while a test runs). Under counit a
  * post-yield verdict only exists once the whole test loop has finished, so every one of these
  * silently degenerated: --stop-on-failure reacted to pre-yield failures only, --repeat ran
- * every repetition, and --retry never retried the flaky post-yield tests it exists for. There
+ * every repetition, --retry never retried the flaky post-yield tests it exists for, and --timeout
+ * never fired (the alarm was disarmed at each test's first yield, and the rest of the bodies ran
+ * in the end-of-run drain, where nothing checks the deadline). There
  * is no partial fix -- by the time a deferred verdict exists there is nothing left to stop --
  * so while any of these options is active, EVERY test is joined at its first yield (the
  * TimeLimit/OutputExpectations switch shape): each verdict is native and final before the next
@@ -27,8 +32,8 @@ use PHPUnit\TextUI\Configuration\Configuration;
  * Deliberately per run: the flags say "sequence my verdicts", which is inherently serial. This
  * is NOT the rejected --fail-on-risky join (that flag only affects the exit code, correct
  * without joining, and is common in CI where a silent serialization would hurt) -- the
- * --stop-on-*, --repeat and --retry options are explicit requests for sequenced behavior that
- * is otherwise silently wrong.
+ * --stop-on-*, --repeat, --retry and --timeout options are explicit requests for sequenced
+ * behavior that is otherwise silently wrong.
  *
  * @internal this class is not covered by the backward compatibility promise for counit
  */
@@ -66,11 +71,15 @@ final class VerdictSequencing
             if (!$active && method_exists($configuration, 'retry') && (int) $configuration->retry() > 1) { // @phpstan-ignore function.alreadyNarrowedType
                 $active = true;
             }
+            // --timeout exists only as of PHPUnit 13.4.
+            if (!$active && method_exists($configuration, 'hasTimeout') && $configuration->hasTimeout() === true) { // @phpstan-ignore function.alreadyNarrowedType
+                $active = true;
+            }
 
             self::$active = $active;
         } catch (\Throwable) {
             self::$active = false;
-            Helper::notice('verdict-sequencing', 'could not read the --stop-on-*, --repeat and --retry settings (PHPUnit\'s internals have changed); if any of them is set, it may not react to verdicts of tests that finish after their first yield.');
+            Helper::notice('verdict-sequencing', 'could not read the --stop-on-*, --repeat, --retry and --timeout settings (PHPUnit\'s internals have changed); if any of them is set, it may not react to tests that finish after their first yield.');
         }
     }
 
@@ -98,6 +107,6 @@ final class VerdictSequencing
         }
         self::$noticeIssued = true;
 
-        fwrite(STDERR, 'counit notice: a verdict-sequencing option (--stop-on-*, --repeat or --retry) is active, so every test is joined at its first yield to make each verdict final before PHPUnit\'s next scheduling decision -- the run is serialized (exact blocking semantics, no concurrency). Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.' . PHP_EOL);
+        fwrite(STDERR, 'counit notice: a verdict-sequencing option (--stop-on-*, --repeat, --retry or --timeout) is active, so every test is joined at its first yield to make each verdict final before PHPUnit\'s next scheduling decision -- the run is serialized (exact blocking semantics, no concurrency). Set COUNIT_SILENCE_TEARDOWN_NOTICE=1 to silence this notice.' . PHP_EOL);
     }
 }

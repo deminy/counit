@@ -826,15 +826,16 @@ jobs:
           JSON
 
       - name: Test Verdict-Sequencing Options
-        # The --stop-on-* family (and, on PHPUnit 13, --repeat/--retry) makes PHPUnit decide
+        # The --stop-on-* family (and, on PHPUnit 13, --repeat/--retry, and on 13.4+ the run-wide
+        # --timeout) makes PHPUnit decide
         # BETWEEN tests from the verdicts it has so far -- but under counit a post-yield verdict
         # used to exist only after the whole loop had finished: --stop-on-failure never stopped,
         # --repeat ran every repetition, and --retry never retried exactly the flaky post-yield
         # tests it exists for. While any of these options is active, counit now joins every test
         # at its first yield (see VerdictSequencing; serialized run, STDERR notice), so each
         # verdict is final before the next scheduling decision and the expected output is
-        # identical with and without Swoole. --repeat/--retry legs are feature-detected (the
-        # options do not exist on the 12.5 line).
+        # identical with and without Swoole. --repeat/--retry and --timeout legs are
+        # feature-detected (the options do not exist on the 12.5 line).
         run: |
           rc=0
           ./counit -c phpunit.xml.dist --stop-on-failure tests/regression/StopOnFailureTest.php > /tmp/vs.log 2> /tmp/vs.err || rc=$?
@@ -865,6 +866,16 @@ jobs:
             ./counit -c phpunit.xml.dist --retry 3 tests/regression/FlakyRetryTest.php > /tmp/vs.log 2> /dev/null || rc=$?
             test "$rc" -eq 0
             grep -qF 'OK (1 test, 1 assertion)' /tmp/vs.log
+          fi
+          if ./vendor/bin/phpunit --help | grep -qF -- '--timeout'; then
+            # --timeout (PHPUnit 13.4+) limits the whole run: the first test passes, the second is
+            # aborted once the limit is exceeded, and the run exits with code 124.
+            rc=0
+            ./counit -c phpunit.xml.dist --timeout 3 tests/regression/RunTimeLimitTest.php > /tmp/vs.log 2> /dev/null || rc=$?
+            cat /tmp/vs.log
+            test "$rc" -eq 124
+            grep -qF 'The time limit of 3 seconds for the test run was exceeded.' /tmp/vs.log
+            grep -qF 'Tests: 2, Assertions: 1, Errors: 1.' /tmp/vs.log
           fi
 
       - name: Test Late Failure/Error Handling
