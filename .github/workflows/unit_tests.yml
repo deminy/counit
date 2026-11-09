@@ -27,6 +27,10 @@ jobs:
 
           sleep 15 # Seems that we need to give the MySQL container enough time to warm up.
 
+          # Composer >= 2.10 refuses releases with a security advisory by default (every PHPUnit
+          # 8.0.x / 9.0.x release has one); the matrix tests these floor releases regardless. Older
+          # Composer lacks the setting, hence "|| true".
+          docker compose exec -T swoole composer config policy.advisories.block false || true
           docker compose exec -T swoole composer require "phpunit/phpunit=${{ matrix.phpunit }}" -W -nq --no-progress
           docker compose exec -T swoole ./vendor/bin/phpunit --version # Check current version of PHPUnit.
 
@@ -47,7 +51,7 @@ jobs:
           docker compose exec -T php ./counit --testsuite manual
 
           # Run tests using counit, with Swoole enabled.
-          docker compose exec -T swoole ./counit --testsuite automatic
+          docker compose exec -T swoole ./counit --testsuite automatic 2>&1 | tee /tmp/automatic-swoole.log
           docker compose exec -T swoole ./counit --testsuite manual 2>&1 | tee /tmp/manual-swoole.log
 
           # A run silently falling back to blocking mode still passes, with the blocking summary
@@ -58,4 +62,4 @@ jobs:
           # Nor may a clean run print a "counit notice:" line: counit announces there when a
           # PHPUnit internal it depends on has changed and a feature fell back.
           # (Not "! grep": bash's errexit ignores a negated command unless it is the last one.)
-          if grep -qF 'counit notice:' /tmp/manual-swoole.log; then exit 1; fi
+          if grep -qF 'counit notice:' /tmp/automatic-swoole.log /tmp/manual-swoole.log; then exit 1; fi

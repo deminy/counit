@@ -20,7 +20,9 @@ jobs:
         run: |
           set -ex
           if [[ ${{ matrix.php }} == '7.3' ]] ; then
-            docker run -q --rm -v "$(pwd)/src:/data" -i cytopia/phplint:${{ matrix.php }}
+            # No jakzal/phpqa image exists for PHP 7.3: lint the same paths with plain php -l.
+            docker run -q --rm -v "$(pwd):/project" -w /project php:7.3-cli-alpine sh -c \
+              'set -e; for f in $(find src tests -name "*.php") counit; do php -l "$f" > /dev/null; done'
           else
             docker run -q --rm -v "$(pwd):/project" -w /project -i jakzal/phpqa:php${{ matrix.php }} phplint src tests ./counit
           fi

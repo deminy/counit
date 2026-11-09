@@ -1,5 +1,5 @@
 # counit: to run time/IO related unit tests faster using Swoole
-[![Library Status](https://github.com/deminy/counit/workflows/Unit%20Tests/badge.svg)](https://github.com/deminy/counit/actions)
+[![Library Status](https://github.com/deminy/counit/workflows/Unit%20Tests/badge.svg?branch=0.x)](https://github.com/deminy/counit/actions?query=branch%3A0.x)
 [![Latest Stable Version](https://poser.pugx.org/deminy/counit/v/stable.svg)](https://packagist.org/packages/deminy/counit)
 [![Latest Unstable Version](https://poser.pugx.org/deminy/counit/v/unstable.svg)](https://packagist.org/packages/deminy/counit)
 [![License](https://poser.pugx.org/deminy/counit/license.svg)](https://packagist.org/packages/deminy/counit)
