@@ -20,13 +20,13 @@ services:
     volumes:
       - ./:/var/www
   mysql:
-    image: mysql
+    image: mysql:26
     environment:
       MYSQL_DATABASE: test
       MYSQL_USER: username
       MYSQL_PASSWORD: password
       MYSQL_ROOT_PASSWORD: password
   redis:
-    image: redis
+    image: redis:8
   web:
     image: deminy/delayed-http-response:1.0.0
